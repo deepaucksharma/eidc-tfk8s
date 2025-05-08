@@ -1,0 +1,67 @@
+metadata:
+  id: TF-[PREFIX]-[NUMBER]_[FeatureName]
+  name: "[Feature Name]"
+  description: "[Detailed description of what this scenario tests]"
+  version: 1.0.0
+  tags:
+    - [category]
+    - [component]
+    - [feature-area]
+  created: "[YYYY-MM-DD]"
+  eidc_references:
+    - [eidc/1.2/path/to/referenced/file.md#Section]
+
+requirements:
+  cluster_type: [kind|k3d-duo]  # Select appropriate cluster type
+  components:
+    - [component1]
+    - [component2]
+  min_duration: 120s  # Minimum time required to collect enough data
+
+steps:
+  - name: "Deploy components"
+    critical: true
+    commands:
+      - "kubectl apply -f {scenario_dir}/k8s/[component1].yaml -n {namespace}"
+      - "kubectl wait --for=condition=Ready pod -l app=[component1] -n {namespace} --timeout=60s"
+  
+  - name: "Deploy test workload"
+    critical: true
+    commands:
+      - "kubectl apply -f {scenario_dir}/k8s/[test-workload].yaml -n {namespace}"
+      - "kubectl wait --for=condition=Ready pod -l app=[test-workload] -n {namespace} --timeout=60s"
+  
+  - name: "Wait for metrics collection"
+    commands:
+      - "sleep 30"  # Adjust based on collection interval
+  
+  - name: "Collect metrics/logs"
+    critical: true
+    commands:
+      - "[Commands to port-forward, scrape endpoints, or collect logs]"
+      - "[Commands to save outputs to {output_dir}]"
+  
+  - name: "Verify results"
+    commands:
+      - "python {scenario_dir}/verify.py {output_dir}/[collected-data-file]"
+  
+  - name: "Cleanup resources"
+    critical: false
+    commands:
+      - "kubectl delete -f {scenario_dir}/k8s/[test-workload].yaml -n {namespace} --ignore-not-found"
+
+success_criteria:
+  - name: "[Primary Success Criterion]"
+    threshold: [NUMBER]
+    metric: "[metric_name]"
+    description: "[Description of what this criterion measures]"
+
+  - name: "[Secondary Success Criterion]"
+    threshold: [NUMBER]
+    metric: "[metric_name]"
+    description: "[Description of what this criterion measures]"
+
+  - name: "[Optional Additional Criterion]"
+    threshold: [NUMBER]
+    metric: "[metric_name]"
+    description: "[Description of what this criterion measures]"

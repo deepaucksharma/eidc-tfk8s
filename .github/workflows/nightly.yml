@@ -1,0 +1,77 @@
+name: EIDC-TF-K8s Nightly
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Run at midnight UTC
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  SECURITY_GATES: true
+
+jobs:
+  full-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false  # Don't persist default token
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tf-k8s/requirements.txt
+      
+      - name: Run all TF-K8s validation groups
+        run: |
+          # Setup cluster
+          bash tf-k8s/scripts/cluster-ctrl.sh setup kind
+          
+          # Run all scenario groups
+          for group in slo-core slo-perf slo-alert mfr-basic mfr-advanced mfr-components regression
+          do
+            echo "Running group: $group"
+            python tf-k8s/scripts/scenario-runner.py --group $group --cluster kind
+          done
+          
+          # Run security tests if enabled
+          if [ "$SECURITY_GATES" = "true" ]; then
+            echo "Running security gates"
+            python tf-k8s/scripts/scenario-runner.py --group security --cluster kind
+          fi
+      
+      - name: Generate scorecard and documentation
+        run: |
+          python .ci/generate_docs.py
+      
+      - name: Check for drift
+        id: drift
+        run: |
+          if git diff --name-only | grep -q -E '\.md$|\.html$|\.svg$'; then
+            echo "drift=true" >> $GITHUB_OUTPUT
+            git diff > drift.patch
+          else
+            echo "drift=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create drift issue
+        if: steps.drift.outputs.drift == 'true'
+        uses: peter-evans/create-issue-from-file@v4
+        with:
+          title: Documentation Drift Detected
+          content-filepath: drift.patch
+          labels: drift, documentation, automated
+      
+      - name: Commit and push scorecard
+        if: always()
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: 'docs/scorecard.md'
+          message: 'chore: update scorecard [skip ci]'
+          default_author: github_actions
+          github_token: ${{ secrets.GH_WRITE_TOKEN }}

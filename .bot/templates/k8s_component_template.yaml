@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: [component]-config
+data:
+  config.yaml: |
+    # Configuration for [component]
+    # TODO: This template will need to be customized for the specific component
+    
+    # Example configuration sections:
+    receivers:
+      # Input data sources
+    
+    processors:
+      # Data transformation steps
+    
+    exporters:
+      # Output destinations
+    
+    service:
+      # Pipeline definitions
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: [component]
+  labels:
+    app: [component]
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: [component]
+  template:
+    metadata:
+      labels:
+        app: [component]
+      annotations:
+        # Add any required annotations here
+    spec:
+      containers:
+      - name: [component]
+        image: [image-repository]/[component]:[tag]
+        imagePullPolicy: Always
+        ports:
+        - containerPort: [port]
+          name: [port-name]
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/[component]
+        # Add any required environment variables
+        env:
+        - name: MY_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        # Add liveness and readiness probes if applicable
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: [port]
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        securityContext:
+          # Add any security context settings
+      volumes:
+      - name: config-volume
+        configMap:
+          name: [component]-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: [component]
+spec:
+  selector:
+    app: [component]
+  ports:
+  - name: [port-name] 
+    port: [port]
+    targetPort: [port]
+  type: ClusterIP

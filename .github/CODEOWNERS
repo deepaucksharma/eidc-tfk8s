@@ -1,0 +1,21 @@
+# EIDC-TFK8s CODEOWNERS File
+# This file determines who must approve changes to different parts of the codebase
+
+# Default owners for everything
+* @deepaucksharma
+
+# EIDC Specification
+/eidc/ @deepaucksharma @eidc-spec-reviewers
+
+# TF-K8s Validation Framework
+/tf-k8s/ @deepaucksharma @tfk8s-maintainers
+
+# CI/CD and Workflows
+/.ci/ @deepaucksharma @cicd-team
+/.github/ @deepaucksharma @cicd-team
+
+# Bot and Automation
+/.bot/ @deepaucksharma
+
+# Documentation
+/docs/ @deepaucksharma @doc-team

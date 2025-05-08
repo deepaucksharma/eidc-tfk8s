@@ -1,0 +1,43 @@
+---
+# EIDC-TFk8s .yamllint configuration
+
+extends: default
+
+rules:
+  # 120 char lines are fine
+  line-length:
+    max: 120
+    level: warning
+  
+  # Don't complain about comment markers
+  comments:
+    min-spaces-from-content: 1
+    require-starting-space: true
+    ignore-shebangs: true
+    level: warning
+  
+  # Don't be too strict about indentation in YAML
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+    check-multi-line-strings: false
+  
+  # Other relaxed rules
+  empty-lines:
+    max: 2
+    max-start: 1
+    max-end: 1
+  
+  document-start:
+    present: false
+  
+  truthy:
+    check-keys: false
+    allowed-values: ['true', 'false', 'yes', 'no']
+
+# Files to ignore
+ignore: |
+  .github/
+  vendor/
+  node_modules/
+  *.md

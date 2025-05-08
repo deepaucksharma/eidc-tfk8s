@@ -1,128 +1,109 @@
-# SmartCollector_Output_Metrics_v1.2.yaml
-# EIDC v1.2 Minimal Export Schema Definition
-
+title: "NRDOT+ Smart Collector Output Metrics Schema"
+description: "Defines the schema for metrics output by the NRDOT+ Smart Collector component"
+version: "1.2.0"
 metrics:
-  # Process-level metrics (per-process series)
-  - name: "process.cpu.utilization"
-    type: "gauge"
-    unit: "1" # ratio 0-1
-    required_attributes:
-      - "host.name"
-      - "process.pid"
-      - "process.start_time_ns"
-      - "process.executable.name"
-      - "process.custom.classification"
-    
   - name: "process.cpu.time"
+    description: "Total CPU time consumed by the process"
     type: "sum"
-    temporality: "delta"
     unit: "s"
-    required_attributes:
-      - "host.name"
-      - "process.pid"
-      - "process.start_time_ns"
-      - "process.executable.name"
-      - "process.custom.classification"
-      - "cpu"
-      - "state"
-    
+    attributes:
+      - name: "pid"
+        description: "Process ID"
+        type: "int"
+        required: true
+      - name: "process.executable.name"
+        description: "Name of the executable"
+        type: "string"
+        required: true
+      - name: "process.start_time_ns"
+        description: "Process start time in nanoseconds since Unix epoch"
+        type: "int"
+        required: true
+      - name: "host.id"
+        description: "Host identifier"
+        type: "string"
+        required: true
+      - name: "process.category"
+        description: "Classification of the process (system, user, etc.)"
+        type: "string"
+        required: true
+        enum: ["system", "daemon", "service", "job", "user", "unknown"]
+      - name: "process.priority"
+        description: "Priority class of the process (high, low, etc.)"
+        type: "string"
+        required: false
+        enum: ["high", "normal", "low", "background"]
+    aggregation:
+      temporality: "delta"
+      monotonic: true
+
   - name: "process.memory.usage"
+    description: "Memory used by the process"
     type: "gauge"
-    unit: "By"
-    required_attributes:
-      - "host.name"
-      - "process.pid"
-      - "process.start_time_ns"
-      - "process.executable.name"
-      - "process.custom.classification"
-    
-  - name: "process.disk.io"
-    type: "sum"
-    temporality: "delta"
-    unit: "By"
-    required_attributes:
-      - "host.name"
-      - "process.pid"
-      - "process.start_time_ns"
-      - "process.executable.name"
-      - "process.custom.classification"
-      - "direction"
-    
-  - name: "process.network.io"
-    type: "sum"
-    temporality: "delta"
-    unit: "By"
-    required_attributes:
-      - "host.name"
-      - "process.pid"
-      - "process.start_time_ns"
-      - "process.executable.name"
-      - "process.custom.classification"
-      - "direction"
-  
-  # Aggregated "other" metrics (process aggregations without PID)
-  - name: "process.aggregated.other.cpu.utilization"
-    type: "gauge"
-    unit: "1" # ratio 0-1
-    aggregation_type: "mean"
-    required_attributes:
-      - "host.name"
-      - "process.custom.classification" # Value MUST be "other_aggregate"
-    
-  - name: "process.aggregated.other.memory.usage"
-    type: "gauge"
-    unit: "By"
-    aggregation_type: "sum"
-    required_attributes:
-      - "host.name"
-      - "process.custom.classification" # Value MUST be "other_aggregate"
-    
-  - name: "process.aggregated.other.disk.io"
-    type: "sum"
-    temporality: "delta"
-    unit: "By"
-    aggregation_type: "sum"
-    required_attributes:
-      - "host.name"
-      - "process.custom.classification" # Value MUST be "other_aggregate"
-      - "direction"
-  
-  # System-level metrics
-  - name: "system.cpu.utilization"
-    type: "gauge"
-    unit: "1" # ratio 0-1
-    required_attributes:
-      - "host.name"
-      - "cpu"
-      - "state"
-    
-  - name: "system.memory.usage"
-    type: "gauge"
-    unit: "By"
-    required_attributes:
-      - "host.name"
-      - "state"
+    unit: "bytes"
+    attributes:
+      - name: "pid"
+        description: "Process ID"
+        type: "int"
+        required: true
+      - name: "process.executable.name"
+        description: "Name of the executable"
+        type: "string"
+        required: true
+      - name: "process.start_time_ns"
+        description: "Process start time in nanoseconds since Unix epoch"
+        type: "int"
+        required: true
+      - name: "host.id"
+        description: "Host identifier"
+        type: "string"
+        required: true
+      - name: "process.category"
+        description: "Classification of the process (system, user, etc.)"
+        type: "string"
+        required: true
+        enum: ["system", "daemon", "service", "job", "user", "unknown"]
+      - name: "memory.type"
+        description: "Type of memory measurement"
+        type: "string"
+        required: true
+        enum: ["rss", "virtual", "shared", "private", "swap"]
 
-# Resource attributes mandatory on ALL exported metrics
-resource_attributes:
-  - "host.name"
-  - "service.name" # For COMP-SC = "nrdotplus-collector"
-  # Optional based on environment
-  - "k8s.pod.name" # If running in K8s
-  - "k8s.namespace.name" # If running in K8s
+  - name: "process.aggregated.other.count"
+    description: "Count of additional processes that didn't meet inclusion criteria"
+    type: "gauge"
+    attributes:
+      - name: "host.id"
+        description: "Host identifier"
+        type: "string"
+        required: true
+      - name: "process.category"
+        description: "Classification of the processes in this group"
+        type: "string"
+        required: true
+        enum: ["system", "daemon", "service", "job", "user", "unknown"]
 
-# Process classification enum
-process_custom_classification:
-  - "database"
-  - "system_daemon" 
-  - "app_runtime"
-  - "other_persistent"
-  - "other_ephemeral"
-  - "other_aggregate" # Special value for aggregated metrics
-  - "monitoring_agent"
+examples:
+  - name: "process.cpu.time"
+    attributes:
+      pid: 1234
+      "process.executable.name": "nginx"
+      "process.start_time_ns": 1651234567890123456
+      "host.id": "host-abc123"
+      "process.category": "service"
+      "process.priority": "normal"
+    value: 0.856
 
-# Optional diagnostic attributes
-optional_attributes:
-  - "process.custom.command_line_hash" # SHA-256 hash of command line
-  - "process.custom.criticality_level" # e.g., "P0", "P1"
-  - "process.custom.boot_id_ref" # Only present when fallback dedup is used
+  - name: "process.memory.usage"
+    attributes:
+      pid: 1234
+      "process.executable.name": "nginx"
+      "process.start_time_ns": 1651234567890123456
+      "host.id": "host-abc123"
+      "process.category": "service"
+      "memory.type": "rss"
+    value: 52428800
+
+security:
+  pii_fields: ["process.executable.name"]
+  privacy_notes: "Process executable names may reveal sensitive information about user activity or system configuration. Classification filter ensures appropriate scoping."

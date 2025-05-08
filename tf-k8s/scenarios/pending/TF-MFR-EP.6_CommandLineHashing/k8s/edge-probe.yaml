@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edge-probe-config
+data:
+  config.yaml: |
+    collector:
+      interval: 10s
+      process_command_line_enabled: true
+      process_command_line_hash_algorithm: "sha256"
+    
+    server:
+      port: 8888
+      metrics_path: "/metrics"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-probe
+  labels:
+    app: edge-probe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edge-probe
+  template:
+    metadata:
+      labels:
+        app: edge-probe
+    spec:
+      containers:
+      - name: edge-probe
+        image: ghcr.io/deepaucksharma/nr-edge-probe:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8888
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/edge-probe
+        - name: proc-volume
+          mountPath: /host/proc
+          readOnly: true
+        securityContext:
+          privileged: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: edge-probe-config
+      - name: proc-volume
+        hostPath:
+          path: /proc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge-probe
+spec:
+  selector:
+    app: edge-probe
+  ports:
+  - port: 8888
+    targetPort: 8888
+  type: ClusterIP
