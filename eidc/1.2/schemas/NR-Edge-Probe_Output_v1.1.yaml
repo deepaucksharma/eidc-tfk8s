@@ -1,0 +1,74 @@
+# NR-Edge-Probe_Output_v1.1.yaml
+# EIDC v1.2 Edge-Probe Prometheus Output Schema
+
+metrics:
+  # Core process metrics exposed by Edge-Probe
+  - name: "nr_edge_process_cpu_utilization"
+    type: "gauge"
+    unit: "1" # ratio 0-1, not scaled to 100
+    help: "Process CPU utilization as ratio of available CPU"
+    required_labels:
+      - "process_pid"
+      - "process_start_time_ns"
+      - "process_executable_name"
+    
+  - name: "nr_edge_process_memory_rss_bytes"
+    type: "gauge"
+    unit: "By" 
+    help: "Process RSS memory usage in bytes"
+    required_labels:
+      - "process_pid"
+      - "process_start_time_ns"
+      - "process_executable_name"
+    
+  - name: "nr_edge_process_disk_read_bytes_total"
+    type: "counter"
+    unit: "By"
+    help: "Total disk read bytes"
+    required_labels:
+      - "process_pid"
+      - "process_start_time_ns"
+      - "process_executable_name"
+    
+  - name: "nr_edge_process_disk_write_bytes_total"
+    type: "counter"
+    unit: "By"
+    help: "Total disk write bytes"
+    required_labels:
+      - "process_pid"
+      - "process_start_time_ns"
+      - "process_executable_name"
+    
+  # Self-monitoring metrics
+  - name: "nr_edge_self_cpu_utilization"
+    type: "gauge"
+    unit: "1"
+    help: "Edge-Probe's own CPU utilization"
+    required_labels: []
+    
+  - name: "nr_edge_self_memory_rss_bytes"
+    type: "gauge"
+    unit: "By"
+    help: "Edge-Probe's own RSS memory usage"
+    required_labels: []
+    
+  - name: "nr_edge_info"
+    type: "gauge"
+    unit: "1"
+    help: "Edge-Probe version and configuration information"
+    required_labels:
+      - "version"
+      - "build_date"
+      - "top_k_processes"
+      - "refresh_interval_seconds"
+
+# Required labels on all process metrics
+required_process_labels:
+  - "process_pid" # int64 as string
+  - "process_start_time_ns" # int64 nanosecond UTC epoch as string
+  - "process_executable_name" # basename, not full path
+
+# Optional labels
+optional_labels:
+  - "process_owner" # effective user
+  - "process_command_line_hash" # SHA-256 hash

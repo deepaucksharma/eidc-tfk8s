@@ -1,0 +1,128 @@
+# SmartCollector_Output_Metrics_v1.2.yaml
+# EIDC v1.2 Minimal Export Schema Definition
+
+metrics:
+  # Process-level metrics (per-process series)
+  - name: "process.cpu.utilization"
+    type: "gauge"
+    unit: "1" # ratio 0-1
+    required_attributes:
+      - "host.name"
+      - "process.pid"
+      - "process.start_time_ns"
+      - "process.executable.name"
+      - "process.custom.classification"
+    
+  - name: "process.cpu.time"
+    type: "sum"
+    temporality: "delta"
+    unit: "s"
+    required_attributes:
+      - "host.name"
+      - "process.pid"
+      - "process.start_time_ns"
+      - "process.executable.name"
+      - "process.custom.classification"
+      - "cpu"
+      - "state"
+    
+  - name: "process.memory.usage"
+    type: "gauge"
+    unit: "By"
+    required_attributes:
+      - "host.name"
+      - "process.pid"
+      - "process.start_time_ns"
+      - "process.executable.name"
+      - "process.custom.classification"
+    
+  - name: "process.disk.io"
+    type: "sum"
+    temporality: "delta"
+    unit: "By"
+    required_attributes:
+      - "host.name"
+      - "process.pid"
+      - "process.start_time_ns"
+      - "process.executable.name"
+      - "process.custom.classification"
+      - "direction"
+    
+  - name: "process.network.io"
+    type: "sum"
+    temporality: "delta"
+    unit: "By"
+    required_attributes:
+      - "host.name"
+      - "process.pid"
+      - "process.start_time_ns"
+      - "process.executable.name"
+      - "process.custom.classification"
+      - "direction"
+  
+  # Aggregated "other" metrics (process aggregations without PID)
+  - name: "process.aggregated.other.cpu.utilization"
+    type: "gauge"
+    unit: "1" # ratio 0-1
+    aggregation_type: "mean"
+    required_attributes:
+      - "host.name"
+      - "process.custom.classification" # Value MUST be "other_aggregate"
+    
+  - name: "process.aggregated.other.memory.usage"
+    type: "gauge"
+    unit: "By"
+    aggregation_type: "sum"
+    required_attributes:
+      - "host.name"
+      - "process.custom.classification" # Value MUST be "other_aggregate"
+    
+  - name: "process.aggregated.other.disk.io"
+    type: "sum"
+    temporality: "delta"
+    unit: "By"
+    aggregation_type: "sum"
+    required_attributes:
+      - "host.name"
+      - "process.custom.classification" # Value MUST be "other_aggregate"
+      - "direction"
+  
+  # System-level metrics
+  - name: "system.cpu.utilization"
+    type: "gauge"
+    unit: "1" # ratio 0-1
+    required_attributes:
+      - "host.name"
+      - "cpu"
+      - "state"
+    
+  - name: "system.memory.usage"
+    type: "gauge"
+    unit: "By"
+    required_attributes:
+      - "host.name"
+      - "state"
+
+# Resource attributes mandatory on ALL exported metrics
+resource_attributes:
+  - "host.name"
+  - "service.name" # For COMP-SC = "nrdotplus-collector"
+  # Optional based on environment
+  - "k8s.pod.name" # If running in K8s
+  - "k8s.namespace.name" # If running in K8s
+
+# Process classification enum
+process_custom_classification:
+  - "database"
+  - "system_daemon" 
+  - "app_runtime"
+  - "other_persistent"
+  - "other_ephemeral"
+  - "other_aggregate" # Special value for aggregated metrics
+  - "monitoring_agent"
+
+# Optional diagnostic attributes
+optional_attributes:
+  - "process.custom.command_line_hash" # SHA-256 hash of command line
+  - "process.custom.criticality_level" # e.g., "P0", "P1"
+  - "process.custom.boot_id_ref" # Only present when fallback dedup is used
