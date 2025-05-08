@@ -16,13 +16,30 @@ TF-K8s provides the validation framework that uses Kubernetes environments to te
 - [**eidc/1.2/**](./eidc/1.2/): EIDC Documentation
   - [EIDC-NRDOT+-FinalBlueprint.md](./eidc/1.2/EIDC-NRDOT+-FinalBlueprint.md): Final Blueprint
   - [annex_a_mfr_tables.md](./eidc/1.2/annex_a_mfr_tables.md): Detailed MFR Tables
+  - [annex_b_pipeline_config_examples.md](./eidc/1.2/annex_b_pipeline_config_examples.md): OTel Collector Config Snippets
   - [annex_c_security.md](./eidc/1.2/annex_c_security.md): Security Requirements
   - [annex_d_glossary.md](./eidc/1.2/annex_d_glossary.md): Terms and Definitions
+  - [annex_e_migration_guide.md](./eidc/1.2/annex_e_migration_guide.md): Migration from v0.125 to v0.136.1-nr1
+  - [annex_f_troubleshooting.md](./eidc/1.2/annex_f_troubleshooting.md): Troubleshooting Guide
   - [schemas/](./eidc/1.2/schemas/): Output Schema Definitions
+    - [SmartCollector_Output_Metrics_v1.2.yaml](./eidc/1.2/schemas/SmartCollector_Output_Metrics_v1.2.yaml): Smart Collector Schema
+    - [NR-Edge-Probe_Output_v1.1.yaml](./eidc/1.2/schemas/NR-Edge-Probe_Output_v1.1.yaml): Edge-Probe Schema
 
 - [**tf-k8s/1.0/**](./tf-k8s/1.0/): TF-K8s Validation Suite
   - [TF-K8s-NRDOT+-ValidationSuite-Final.md](./tf-k8s/1.0/TF-K8s-NRDOT+-ValidationSuite-Final.md): Validation Plan
   - [scenario_catalogue.md](./tf-k8s/1.0/scenario_catalogue.md): Test Scenario Catalog
+
+- [**tf-k8s/quickstart/**](./tf-k8s/quickstart/): Reference Configurations
+  - [collector-functional.yaml](./tf-k8s/quickstart/collector-functional.yaml): Standard Configuration
+  - [collector-secure.yaml](./tf-k8s/quickstart/collector-secure.yaml): Security-Enhanced Configuration
+
+- [**tf-k8s/config/**](./tf-k8s/config/): Validation Configuration
+  - [thresholds-eidc-v1.2.yaml](./tf-k8s/config/thresholds-eidc-v1.2.yaml): SLO and MFR Thresholds
+  - [helm-values-example.yaml](./tf-k8s/config/helm-values-example.yaml): Example Helm Values
+
+- [**.bot/**](./.bot/): TDD Process Documentation
+  - [PROCESS.md](./.bot/PROCESS.md): Test-Driven Development Blueprint
+  - [prompts/](./.bot/prompts/): AI Prompt Templates
 
 ## Key Features
 
@@ -72,6 +89,29 @@ TF-K8s provides:
 - Standardized validation scenarios
 - Automated SLO verification
 - Multi-node test capability
+
+## Getting Started
+
+To quickly deploy a NRDOT+ Smart Collector:
+
+1. Clone this repository
+2. Copy and customize a configuration from `tf-k8s/quickstart/`
+3. Deploy using the reference configuration:
+
+```bash
+kubectl create configmap nrdotplus-config --from-file=config.yaml=./tf-k8s/quickstart/collector-functional.yaml
+kubectl apply -f ./path/to/deployment.yaml
+```
+
+## Development Process
+
+This project follows a test-driven development approach as outlined in [.bot/PROCESS.md](./.bot/PROCESS.md), which includes:
+
+- Single-source-of-truth principles
+- Fail-fast by test methodology
+- Small, reversible steps
+- AI-assisted but human-reviewed changes
+- Automated drift detection
 
 ## License
 
