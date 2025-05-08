@@ -1,0 +1,63 @@
+metadata:
+  id: TF-MFR-EP.6_CommandLineHashing
+  name: "Command Line Hashing in Edge-Probe"
+  description: "Validates that Edge-Probe correctly implements command line hashing to protect PII"
+  version: 1.0.0
+  tags:
+    - security
+    - edge-probe
+    - hashing
+  created: "2025-05-09"
+  eidc_references:
+    - annex_c_security.md#PII
+
+requirements:
+  cluster_type: kind
+  components:
+    - edge-probe
+    - smart-collector
+
+steps:
+  - name: "Deploy Edge-Probe"
+    critical: true
+    commands:
+      - "kubectl apply -f {scenario_dir}/k8s/edge-probe.yaml -n {namespace}"
+      - "kubectl wait --for=condition=Ready pod -l app=edge-probe -n {namespace} --timeout=60s"
+  
+  - name: "Deploy test process with sensitive command line"
+    critical: true
+    commands:
+      - "kubectl apply -f {scenario_dir}/k8s/test-process.yaml -n {namespace}"
+      - "kubectl wait --for=condition=Ready pod -l app=test-process -n {namespace} --timeout=60s"
+  
+  - name: "Wait for metrics to be collected"
+    commands:
+      - "sleep 30"
+  
+  - name: "Collect metrics from Edge-Probe"
+    critical: true
+    commands:
+      - "kubectl port-forward svc/edge-probe -n {namespace} 8888:8888 &"
+      - "sleep 5"
+      - "curl -s localhost:8888/metrics > {output_dir}/edge-probe-metrics.txt"
+      - "pkill -f 'port-forward svc/edge-probe' || true"
+  
+  - name: "Verify command line hashing"
+    commands:
+      - "python {scenario_dir}/verify_hashing.py {output_dir}/edge-probe-metrics.txt"
+
+success_criteria:
+  - name: "Command line is correctly hashed"
+    threshold: 100
+    metric: "hashing_success_percentage"
+    description: "Percentage of process command lines that are properly hashed"
+
+  - name: "Original command line is not present"
+    threshold: 0
+    metric: "original_command_found_count"
+    description: "Count of instances where the original command line is found (should be 0)"
+
+  - name: "Hash is consistent"
+    threshold: 100
+    metric: "hash_consistency_percentage"
+    description: "Percentage of processes where hash value is consistent with reference implementation"

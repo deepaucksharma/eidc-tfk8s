@@ -1,0 +1,96 @@
+title: "NR-Edge-Probe Output Schema"
+description: "Defines the schema for metrics output by the NR-Edge-Probe component"
+version: "1.2.0"
+metrics:
+  - name: "process.cpu.utilization"
+    description: "CPU utilization of the process as a fraction of total CPU capacity"
+    type: "gauge"
+    unit: "1"
+    attributes:
+      - name: "pid"
+        description: "Process ID"
+        type: "int"
+        required: true
+      - name: "process.executable.name"
+        description: "Name of the executable"
+        type: "string"
+        required: true
+      - name: "process_command_line_hash"
+        description: "SHA-256 hash of the full command line of the process"
+        type: "string"
+        required: false
+      - name: "host.id"
+        description: "Host identifier"
+        type: "string"
+        required: true
+      - name: "cpu.state"
+        description: "CPU state (user, system, etc.)"
+        type: "string"
+        required: false
+        enum: ["user", "system", "wait", "idle"]
+
+  - name: "process.memory.utilization"
+    description: "Memory utilization of the process as a fraction of total memory"
+    type: "gauge"
+    unit: "1"
+    attributes:
+      - name: "pid"
+        description: "Process ID"
+        type: "int"
+        required: true
+      - name: "process.executable.name"
+        description: "Name of the executable"
+        type: "string"
+        required: true
+      - name: "process_command_line_hash"
+        description: "SHA-256 hash of the full command line of the process"
+        type: "string"
+        required: false
+      - name: "host.id"
+        description: "Host identifier"
+        type: "string"
+        required: true
+
+  - name: "process.disk.operations"
+    description: "Disk operations performed by the process"
+    type: "sum"
+    unit: "1"
+    attributes:
+      - name: "pid"
+        description: "Process ID"
+        type: "int"
+        required: true
+      - name: "process.executable.name"
+        description: "Name of the executable"
+        type: "string"
+        required: true
+      - name: "host.id"
+        description: "Host identifier"
+        type: "string"
+        required: true
+      - name: "direction"
+        description: "Direction of disk operations"
+        type: "string"
+        required: true
+        enum: ["read", "write"]
+    aggregation:
+      temporality: "delta"
+      monotonic: true
+
+examples:
+  - name: "process.cpu.utilization"
+    attributes:
+      pid: 1234
+      "process.executable.name": "nginx"
+      "process_command_line_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "host.id": "host-abc123"
+      "cpu.state": "user"
+    value: 0.15
+
+  - name: "process.memory.utilization"
+    attributes:
+      pid: 1234
+      "process.executable.name": "nginx"
+      "process_command_line_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "host.id": "host-abc123"
+    value

@@ -68,15 +68,16 @@ COMP-EP eBPF agent (if used) MUST run in a privileged container but with a restr
 ## SEC-4: PII Handling
 
 **Requirement:**
-Re-affirms MFR-SC.4: process.command_line and process.command_args MUST be hashed using SHA-256 or dropped entirely, never exported raw.
+Re-affirms MFR-SC.4: process.command_line and process.command_args MUST be hashed using SHA-256 or dropped entirely, never exported raw. Edge-Probe MUST also implement command line hashing using SHA-256 and store the hash value in the process.command_line_hash attribute.
 
 **Implementation Details:**
-- Use SHA-256 hashing for process.command_line and store as process.custom.command_line_hash
+- Use SHA-256 hashing for process.command_line and store as process.custom.command_line_hash in COMP-SC
+- For Edge-Probe, use SHA-256 hashing for process.command_line and store as process.command_line_hash
 - Remove original process.command_line and process.command_args attributes before export
-- Apply consistent hashing across all COMP-SC deployments
+- Apply consistent hashing across all COMP-SC and Edge-Probe deployments
 - Ensure no PII leakage through other attributes
 
-**Validation (TF-MFR-SC.4.2_CommandLineHashing):**
+**Validation (TF-MFR-SC.4.2_CommandLineHashing and TF-MFR-EP.6_CommandLineHashing):**
 - Generate various command lines with sensitive data
 - Verify hashing is applied correctly
 - Confirm original command line data is not present in exported telemetry

@@ -1,67 +1,31 @@
+# Basic skeleton – copy & fill values
 metadata:
-  id: TF-[PREFIX]-[NUMBER]_[FeatureName]
-  name: "[Feature Name]"
-  description: "[Detailed description of what this scenario tests]"
+  id: TF-XXX-000_Feature
+  name: "Short feature title"
+  description: "What this scenario proves"
   version: 1.0.0
-  tags:
-    - [category]
-    - [component]
-    - [feature-area]
-  created: "[YYYY-MM-DD]"
-  eidc_references:
-    - [eidc/1.2/path/to/referenced/file.md#Section]
+  tags: [category]
+  created: YYYY-MM-DD
+  eidc_references: ["eidc/1.2/path.md#Section"]
 
 requirements:
-  cluster_type: [kind|k3d-duo]  # Select appropriate cluster type
-  components:
-    - [component1]
-    - [component2]
-  min_duration: 120s  # Minimum time required to collect enough data
+  cluster_type: kind
+  components: [smart-collector]
+  min_duration: 120s
 
 steps:
-  - name: "Deploy components"
+  - name: "Deploy"
     critical: true
     commands:
-      - "kubectl apply -f {scenario_dir}/k8s/[component1].yaml -n {namespace}"
-      - "kubectl wait --for=condition=Ready pod -l app=[component1] -n {namespace} --timeout=60s"
-  
-  - name: "Deploy test workload"
-    critical: true
+      - "kubectl apply -f {scenario_dir}/k8s/component.yaml -n {namespace}"
+      - "kubectl wait --for=condition=Ready pod -l app=component -n {namespace} --timeout=60s"
+
+  - name: "Verify"
     commands:
-      - "kubectl apply -f {scenario_dir}/k8s/[test-workload].yaml -n {namespace}"
-      - "kubectl wait --for=condition=Ready pod -l app=[test-workload] -n {namespace} --timeout=60s"
-  
-  - name: "Wait for metrics collection"
-    commands:
-      - "sleep 30"  # Adjust based on collection interval
-  
-  - name: "Collect metrics/logs"
-    critical: true
-    commands:
-      - "[Commands to port-forward, scrape endpoints, or collect logs]"
-      - "[Commands to save outputs to {output_dir}]"
-  
-  - name: "Verify results"
-    commands:
-      - "python {scenario_dir}/verify.py {output_dir}/[collected-data-file]"
-  
-  - name: "Cleanup resources"
-    critical: false
-    commands:
-      - "kubectl delete -f {scenario_dir}/k8s/[test-workload].yaml -n {namespace} --ignore-not-found"
+      - "python {scenario_dir}/verify.py {output_dir}/metrics.txt"
 
 success_criteria:
-  - name: "[Primary Success Criterion]"
-    threshold: [NUMBER]
-    metric: "[metric_name]"
-    description: "[Description of what this criterion measures]"
-
-  - name: "[Secondary Success Criterion]"
-    threshold: [NUMBER]
-    metric: "[metric_name]"
-    description: "[Description of what this criterion measures]"
-
-  - name: "[Optional Additional Criterion]"
-    threshold: [NUMBER]
-    metric: "[metric_name]"
-    description: "[Description of what this criterion measures]"
+  - name: "Primary"
+    threshold: 100
+    metric: "pass_percent"
+    description: "Must hit 100% to succeed"

@@ -122,7 +122,13 @@ processors:
           # Hash + drop raw CLI
           - set(attributes["process.custom.command_line_hash"]) =
               SHA256(attributes["process.command_line"])
-              where IsSet(attributes["process.command_line"])
+              where IsSet(attributes["process.command_line"]) and
+                    attributes["otel.metrics.source"] != "edge_probe"
+          # For Edge-Probe, use process_command_line_hash attribute name instead
+          - set(attributes["process_command_line_hash"]) =
+              SHA256(attributes["process.command_line"])
+              where IsSet(attributes["process.command_line"]) and
+                    attributes["otel.metrics.source"] == "edge_probe"
           - delete_key(attributes, "process.command_line")
           - delete_key(attributes, "process.command_args")
 ```
