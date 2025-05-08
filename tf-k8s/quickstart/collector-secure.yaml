@@ -1,0 +1,285 @@
+# NRDOT+ Smart Collector - Security Hardened Configuration
+# EIDC v1.2 Compliant - TF-K8s Reference Implementation with Security Gates
+
+receivers:
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu: {}
+      memory: {}
+      processes: {}
+      process: {}
+
+  prometheus/edge:
+    config:
+      scrape_configs:
+        - job_name: "nr-edge-probe"
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["localhost:9999"]
+          tls_config:
+            ca_file: /etc/otelcol/certs/ca.crt
+          basic_auth:
+            username: ${SCRAPE_USERNAME}
+            password: ${SCRAPE_PASSWORD}
+
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        tls:
+          cert_file: /etc/otelcol/certs/server.crt
+          key_file: /etc/otelcol/certs/server.key
+      http:
+        endpoint: 0.0.0.0:4318
+        tls:
+          cert_file: /etc/otelcol/certs/server.crt
+          key_file: /etc/otelcol/certs/server.key
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 15
+
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 5s
+
+  transform/pid_enrich_normalize:
+    error_mode: ignore
+    trace_statements: []
+    metric_statements:
+      - context: datapoint
+        statements:
+          # LA milliseconds → nanoseconds
+          - set(attributes["process.start_time_ns"]) =
+              MultiplyInt(attributes["process.runtime.jvm.start_time_ms"], 1_000_000)
+              where IsSet(attributes["process.runtime.jvm.start_time_ms"])
+          # Fallback: read /proc for missing start_time_ns
+          - set(attributes["process.start_time_ns"]) =
+              PidStartTimeNs(attributes["process.pid"])
+              where name matches "^process\\." and
+                    (attributes["otel.metrics.source"] == "hostmetrics") and
+                    Not(IsSet(attributes["process.start_time_ns"]))
+          # Boot-id fallback key
+          - set(attributes["process.custom.boot_id_ref"]) =
+              HostBootID()
+              where Not(IsSet(attributes["process.start_time_ns"]))
+          # Extract basename
+          - set(attributes["process.executable.name"]) =
+              Basename(attributes["process.executable.path"])
+              where IsSet(attributes["process.executable.path"])
+
+  filter/deduplicate_sources:
+    error_mode: ignore
+    metrics:
+      metric:
+        # Drop lower-priority hostmetrics
+        - |
+          IsMatch(name, "^process\\.") and
+          attributes["otel.metrics.source"] == "hostmetrics" and
+          SourceCacheContains(
+            "la",
+            attributes["host.name"],
+            attributes["process.pid"],
+            Coalesce(attributes["process.start_time_ns"],
+                     attributes["process.custom.boot_id_ref"])
+          )
+        # Cache insert for LA
+        - action: cacheput
+          key_fields:
+            - attributes["host.name"]
+            - attributes["process.pid"]
+            - Coalesce(attributes["process.start_time_ns"],
+                       attributes["process.custom.boot_id_ref"])
+          value: "la"
+          where attributes["otel.metrics.source"] == "language_agent"
+
+  transform/classify_sanitize:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          # Classification rules
+          - set(attributes["process.custom.classification"]) =
+              "database"
+              where IsMatch(attributes["process.executable.name"], 
+                          "^(mysqld|postgres|mongodb|redis-server|influxd|cassandra)$")
+          - set(attributes["process.custom.classification"]) =
+              "system_daemon"
+              where attributes["process.owner"] == "root" and
+                    IsMatch(attributes["process.executable.name"], 
+                           "^(sshd|systemd|dockerd|containerd|kubelet|crio)$")
+          - set(attributes["process.custom.classification"]) =
+              "app_runtime"
+              where IsMatch(attributes["process.executable.name"], 
+                          "^(java|node|python|ruby|php|perl|dotnet)$")
+          - set(attributes["process.custom.classification"]) =
+              "monitoring_agent"
+              where IsMatch(attributes["process.executable.name"], 
+                          "^(otelcol|prometheus|node_exporter|telegraf|collectd)$")
+          - set(attributes["process.custom.classification"]) =
+              "other_persistent"
+              where Not(IsSet(attributes["process.custom.classification"])) and 
+                    attributes["process.parent.pid"] == 1
+          - set(attributes["process.custom.classification"]) =
+              "other_ephemeral"
+              where Not(IsSet(attributes["process.custom.classification"]))
+
+      - context: datapoint
+        statements:
+          # Hash command line & drop raw
+          - set(attributes["process.custom.command_line_hash"]) =
+              SHA256(attributes["process.command_line"])
+              where IsSet(attributes["process.command_line"])
+          - delete_key(attributes, "process.command_line")
+          - delete_key(attributes, "process.command_args")
+
+  filter/intelligent_filter_sample:
+    error_mode: ignore
+    metrics:
+      metric:
+        # Ultra-low CPU drop
+        - |
+          name == "process.cpu.utilization" and
+          attributes["process.custom.classification"] == "other_ephemeral" and
+          value_double < 0.0005
+        # 1-in-5 deterministic sample
+        - |
+          name matches "^process\\." and
+          attributes["process.custom.classification"] == "other_persistent" and
+          Mod(Hash(attributes["process.pid"]), 5) != 0
+
+  cumulativetodelta:
+    include:
+      match_type: regexp
+      metric_names:
+        - ".*cpu\\.time"
+        - ".*disk\\.io"
+        - ".*network\\.io"
+
+  routing:
+    table:
+      - statement: |
+          attributes["process.custom.classification"] in ("other_persistent","other_ephemeral")
+        pipelines: [ metrics/others ]
+      - pipelines: [ metrics/default ]
+
+  metricstransform/aggregate_other_metrics:
+    transforms:
+      - include: "process.cpu.utilization"
+        new_name: "process.aggregated.other.cpu.utilization"
+        operations:
+          - action: aggregate_labels
+            label_set:
+              - resource.attributes.host.name
+              - attributes.process.custom.classification
+            aggregation_type: mean
+
+      - include: "process.memory.usage"
+        new_name: "process.aggregated.other.memory.usage"
+        operations:
+          - action: aggregate_labels
+            label_set:
+              - resource.attributes.host.name
+              - attributes.process.custom.classification
+            aggregation_type: sum
+
+      - include: "process.disk.io"
+        new_name: "process.aggregated.other.disk.io"
+        operations:
+          - action: aggregate_labels
+            label_set:
+              - resource.attributes.host.name
+              - attributes.process.custom.classification
+              - attributes.direction
+            aggregation_type: sum
+
+  filter/final_schema:
+    error_mode: ignore
+    metrics:
+      metric:
+        - |
+          not SchemaMatch(name)   # drop anything outside schema
+
+  batch:
+    send_batch_size: 1000
+    timeout: 1s
+
+  # SECURITY ENHANCEMENT: OAuth authentication for OTLP export
+  authentication:
+    oauth2:
+      client_id: ${OAUTH_CLIENT_ID}
+      client_secret: ${OAUTH_CLIENT_SECRET}
+      token_url: ${OAUTH_TOKEN_URL}
+      scopes: ["api.metrics.write"]
+
+exporters:
+  otlphttp:
+    endpoint: ${OTLP_ENDPOINT}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    auth:
+      authenticator: oauth2
+    compression: gzip
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 2000
+    tls:
+      insecure: false
+      ca_file: /etc/otelcol/certs/ca.crt
+
+  # For TF-K8s validation use only - comment out in production
+  file:
+    path: /var/log/otelcol/metrics.json
+    rotation:
+      max_megabytes: 100
+      max_days: 1
+      max_backups: 1
+
+extensions:
+  health_check: {}
+  pprof:
+    endpoint: 127.0.0.1:1777 # Only allow local connections
+  zpages:
+    endpoint: 127.0.0.1:55679 # Only allow local connections
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  telemetry:
+    logs:
+      level: "info"
+      encoding: "json"
+      output_paths: ["stdout", "/var/log/otelcol/collector.log"]
+      error_output_paths: ["stderr", "/var/log/otelcol/collector-error.log"]
+    metrics:
+      level: "detailed"
+      address: 127.0.0.1:8888 # Only allow local connections
+  
+  pipelines:
+    # Main optimized pipeline
+    metrics/default:
+      receivers: [hostmetrics, prometheus/edge, otlp]
+      processors:
+        - memory_limiter
+        - batch
+        - resourcedetection
+        - transform/pid_enrich_normalize
+        - filter/deduplicate_sources
+        - transform/classify_sanitize
+        - filter/intelligent_filter_sample
+        - cumulativetodelta
+        - filter/final_schema
+        - authentication
+        - batch
+      exporters: [otlphttp, file]
+    
+    # Specialized "other" aggregation pipeline
+    metrics/others:
+      processors:
+        - metricstransform/aggregate_other_metrics
+        - batch
+      exporters: [otlphttp, file]

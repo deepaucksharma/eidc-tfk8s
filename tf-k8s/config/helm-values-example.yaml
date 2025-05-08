@@ -1,0 +1,151 @@
+# Example Helm values for NRDOT+ Smart Collector
+# Based on EIDC v1.2 Blueprint
+
+# Global settings
+global:
+  newRelicLicenseKey: "${NEW_RELIC_LICENSE_KEY}"
+  environment: "production"
+  logLevel: "info"
+
+# Smart Collector configuration
+smartCollector:
+  image:
+    repository: ghcr.io/deepaucksharma/nrdotplus-collector
+    tag: "v1.2.0"
+    pullPolicy: IfNotPresent
+  
+  # PID enrichment capability requires hostPID
+  hostPID: true
+  
+  # Resource limits based on SLOs
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  
+  # Configuration for the collector
+  config:
+    # See collector-functional.yaml or collector-secure.yaml for full configs
+    file: "/path/to/config/file.yaml"
+    
+    # Override specific values
+    overrides:
+      receivers:
+        hostmetrics:
+          collection_interval: 10s
+      
+      exporters:
+        otlphttp:
+          endpoint: "https://otlp.nr-data.net:4318"
+      
+      processors:
+        filter/intelligent_filter_sample:
+          error_mode: ignore
+          metrics:
+            metric:
+              # Customize sampling rates
+              - action: exclude
+                name: process.cpu.utilization
+                attributes:
+                  process.custom.classification: other_ephemeral
+                value: 
+                  double: 
+                    lt: 0.001  # More aggressive filtering
+  
+  # Volume mounts
+  volumes:
+    - name: config-volume
+      configMap:
+        name: nrdotplus-collector-config
+    - name: proc
+      hostPath:
+        path: /proc
+    - name: logs
+      emptyDir: {}
+  
+  volumeMounts:
+    - name: config-volume
+      mountPath: /etc/otelcol
+    - name: proc
+      mountPath: /host/proc
+      readOnly: true
+    - name: logs
+      mountPath: /var/log/otelcol
+
+# Edge-Probe configuration (optional)
+edgeProbe:
+  enabled: true
+  image:
+    repository: ghcr.io/deepaucksharma/nr-edge-probe
+    tag: "v1.1.0"
+    pullPolicy: IfNotPresent
+  
+  # Light-weight agent
+  resources:
+    requests:
+      cpu: 20m
+      memory: 50Mi
+    limits:
+      cpu: 100m
+      memory: 100Mi
+  
+  # Configuration
+  config:
+    topK: 10  # Track top-10 CPU processes
+    refreshInterval: 10s
+    prometheusEndpoint: "localhost:9999"
+  
+  # Required capabilities for eBPF
+  securityContext:
+    privileged: true
+    capabilities:
+      add:
+        - BPF
+        - PERFMON
+        - SYS_ADMIN
+    seccompProfile:
+      type: Localhost
+      localhostProfile: "profiles/ebpf_secure.json"
+
+# Kubernetes settings
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: nrdotplus-collector
+
+# Security settings (for SECURITY_GATES=true)
+security:
+  tls:
+    enabled: false
+    secretName: nrdotplus-collector-tls
+  
+  oauth2:
+    enabled: false
+    clientId: "${OAUTH_CLIENT_ID}"
+    clientSecret: "${OAUTH_CLIENT_SECRET}"
+    tokenUrl: "${OAUTH_TOKEN_URL}"
+
+# TestForge-K8s specific settings
+# Only used during validation, not needed in production
+testforge:
+  baselineCollector:
+    enabled: false
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.136.1"
+  
+  workloadGenerator:
+    enabled: false
+    churnRate: "medium"  # low, medium, high
+    processCount: 100
+    testSeed: 12345  # For reproducible sampling
+  
+  comparison:
+    compress: false  # For VOL tests
+    outputPath: "/tmp/test-results"
+    samplingWindow: "15m"
