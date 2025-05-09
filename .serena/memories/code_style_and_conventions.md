@@ -1,75 +1,58 @@
-# NRDOT+ Internal Dev-Lab Code Style and Conventions
+# Code Style and Conventions
 
-## Go Style Guidelines
+## General Style
 
-### Code Formatting
-- Use `gofmt` or `go fmt` to format code
-- Follow the [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments) style guide
-- Maximum line length of 120 characters where practical
+- Follow the [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
+- Use [gofmt](https://golang.org/cmd/gofmt/) to format code
+- Document all public functions and types
 
-### Naming Conventions
-- Use CamelCase for exported names (public) and camelCase for non-exported names (private)
-- Use descriptive names that explain the purpose of the variable, function, or package
-- Acronyms should be consistently cased (e.g., `HTTPServer` or `httpServer`, not `HttpServer`)
-- Package names should be concise, lowercase, and avoid underscores
-- Test files should be named `{source_file}_test.go`
+## Naming Conventions
 
-### Code Organization
-- Each Function Block should be in its own package under `pkg/fb/`
-- Common utilities should be in the `internal/common/` directory
-- API definitions (protobuf, CRDs) should be in the `pkg/api/` directory
-- Entry points (main packages) should be in the `cmd/` directory
-- Tests should be co-located with the code they test
+- Use camelCase for variable names
+- Use PascalCase for exported names (public types, functions, constants)
+- Use snake_case for file names
+- Prefix interface names with 'I' (e.g., IFunctionBlock)
+- Use descriptive names that convey meaning and purpose
 
-### Error Handling
-- Return errors rather than using panic
-- Error messages should be capitalized and not end with punctuation
-- Use error wrapping (`fmt.Errorf("doing X: %w", err)`) to provide context
-- Log errors at the point where they're handled, not where they're generated
+## Package Organization
 
-### Logging
-- Use structured JSON logging
-- Include relevant context in log fields (e.g., batch_id, fb_id, error_code)
-- Use appropriate log levels (info, warning, error)
-- Use ISO-8601 timestamps
+- Main executable packages in `cmd/`
+- Core reusable code in `pkg/`
+- Internal utilities in `internal/`
+- Deployment resources in `deploy/`
+- Each Function Block (FB) has its own directory under `pkg/fb/`
 
-### Testing
-- Aim for high test coverage, especially for critical components
-- Write table-driven tests where appropriate
-- Use testify for assertions and mocks
-- Mock external dependencies for unit tests
+## Error Handling
 
-## Documentation Conventions
+- Use standardized error codes from `pkg/fb/interfaces.go`
+- Wrap errors with context using `fmt.Errorf("context: %w", err)`
+- Log errors with structured fields using the logger from `internal/common/logging`
+- Use circuit breakers for handling downstream failures
 
-### Code Documentation
-- All exported types, functions, and methods must have documentation comments
-- Follow Go's documentation conventions (start with the name of the thing being documented)
-- Include examples for complex functions or types
+## Concurrency Patterns
 
-### Package Documentation
-- Each package should have a package-level doc comment in one of its files
+- Use contexts for cancellation and timeouts
+- Protect shared state with mutexes (e.g., `configMu`)
+- Use channels for signaling and graceful shutdown
+- Follow the graceful shutdown pattern in main functions
 
-### Project Documentation
-- Design documents, runbooks, and user guides should be in the `docs/` directory
-- Use Markdown for documentation
+## Configuration
 
-## Metrics and Observability
+- Function Blocks receive configuration from the ConfigController via gRPC
+- Each FB should validate its configuration
+- Configuration should be applied dynamically when possible
+- Use the `config.FBConfig` for common configuration parameters
 
-### Metric Naming
-- Follow Prometheus naming conventions (snake_case)
-- Prefix all metrics with `fb_` or appropriate component name
-- Include appropriate labels for high cardinality dimensions
+## Observability
 
-### Tracing
-- Use W3C trace context propagation
-- Spans should be named `<fb>-<operation>`
-- Include batch_id and config_generation in span attributes
+- Log in structured JSON format using `internal/common/logging`
+- Expose Prometheus metrics on port 2112 using `internal/common/metrics`
+- Implement W3C-compatible traces using `internal/common/tracing`
+- Include batch_id in logs and traces for correlation
+- Implement health and readiness endpoints
 
-## Versioning and Releases
+## Testing
 
-### Version Numbering
-- Follow Semantic Versioning (MAJOR.MINOR.PATCH)
-- Version should be injected at build time via ldflags
-
-### Tagging
-- Tag releases in git with format `v{version}`
+- Write unit tests for all packages
+- Run integration tests with a Kubernetes cluster
+- Validate SLOs and PII handling

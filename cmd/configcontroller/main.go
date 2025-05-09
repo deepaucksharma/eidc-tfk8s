@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -76,7 +76,7 @@ func main() {
 	})
 
 	metricsServer := &http.Server{
-		Addr:    ":" + string(*metricsPort),
+		Addr:    fmt.Sprintf(":%d", *metricsPort),
 		Handler: nil,
 	}
 

@@ -1,208 +1,193 @@
 # Suggested Commands for NRDOT+ Internal Dev-Lab
 
-## Development Setup
+## Development Commands
 
-### Install prerequisites
+### Building
+
 ```bash
-# Install Go 1.21+ (Windows)
-# Download from https://golang.org/dl/ and run the installer
+# Build all Function Blocks
+docker-compose build
 
-# Install Docker Desktop (Windows)
-# Download from https://www.docker.com/products/docker-desktop
-
-# Install kubectl
-curl -LO "https://dl.k8s.io/release/v1.28.0/bin/windows/amd64/kubectl.exe"
-# Move to a directory in your PATH
-
-# Install Helm
-curl -fsSL -o get_helm.ps1 https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3.ps1
-.\get_helm.ps1
-
-# Install k3d (local Kubernetes)
-curl -LO https://github.com/k3d-io/k3d/releases/download/v5.5.1/k3d-windows-amd64.exe
-# Move to a directory in your PATH
-```
-
-### Project setup
-```bash
-# Clone the repository
-git clone https://github.com/newrelic/nrdot-internal-devlab.git
-cd nrdot-internal-devlab
-
-# Download dependencies
-go mod download
-
-# Create a local Kubernetes cluster
-k3d cluster create nrdot-devlab --servers 1 --agents 3 --registry-create nrdot-registry:5000
-```
-
-## Building & Running
-
-### Build individual Function Blocks
-```bash
-# Build FB-RX
-cd cmd/fb/rx
-go build -o fb-rx.exe main.go
-
-# Build ConfigController
-cd cmd/configcontroller
-go build -o config-controller.exe main.go
-```
-
-### Build Docker Images
-```bash
-# Build FB-RX Docker image
+# Build a specific Function Block
 docker build -t nrdot-internal-devlab/fb-rx:latest -f pkg/fb/rx/Dockerfile .
-
-# Build ConfigController Docker image
-docker build -t nrdot-internal-devlab/config-controller:latest -f cmd/configcontroller/Dockerfile .
 ```
 
-### Run locally (development mode)
-```bash
-# Run FB-RX locally
-cd cmd/fb/rx
-go run main.go --config-service=localhost:5000 --next-fb=localhost:5001
+### Running Locally
 
-# Run ConfigController locally
-cd cmd/configcontroller
-go run main.go --grpc-port=5000
+```bash
+# Start all components with Docker Compose
+docker-compose up -d
+
+# Start specific components
+docker-compose up -d fb-rx fb-en-host fb-cl
+
+# Check running containers
+docker-compose ps
+
+# View logs for a specific service
+docker-compose logs -f fb-rx
 ```
 
-## Testing
+### Testing
 
-### Run unit tests
 ```bash
-# Run all tests
+# Run all unit tests
 go test ./...
 
 # Run tests for a specific package
 go test ./pkg/fb/rx/...
 
 # Run tests with coverage
-go test -cover ./...
-
-# Generate coverage report
 go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
+go tool cover -html=coverage.out
+
+# Run integration tests
+./scripts/run-integration-tests.sh
 ```
 
-### Run SLO tests
+### Linting and Formatting
+
 ```bash
-# Run SLO tests
-cd pkg/test/slo
-go test -v
+# Format code
+gofmt -s -w .
+
+# Lint code
+go vet ./...
+staticcheck ./...
 ```
 
-## Kubernetes Deployment
+### Kubernetes Deployment
 
-### Install CRDs
 ```bash
-kubectl apply -f deploy/k8s/crds/nrdotpluspipeline.yaml
-```
+# Create a local Kubernetes cluster using k3d
+k3d cluster create nrdot-devlab --agents 3 --registry-create registry.localhost:5000
 
-### Deploy with Helm
-```bash
-# Install with default values
-helm install nrdot-devlab ./deploy/helm
+# Install the CRDs
+kubectl apply -f deploy/k8s/crds/
 
-# Install with lab values
+# Deploy with Helm
 helm install nrdot-devlab ./deploy/helm --values ./deploy/helm/values-lab.yaml
 
-# Upgrade existing deployment
-helm upgrade nrdot-devlab ./deploy/helm --values ./deploy/helm/values-lab.yaml
+# Check the status
+kubectl get pods
+
+# View logs for a pod
+kubectl logs -f deployment/fb-rx
+
+# Port forward to access services locally
+kubectl port-forward service/fb-rx 4317:4317
 ```
 
-### Check deployment status
-```bash
-kubectl get pods -n default
-kubectl get nrdotpluspipelines
-kubectl describe nrdotpluspipeline default-pipeline
-```
+## Windows-Specific Commands
 
-## Backup & Restore
+### Git
 
-### Backup PVCs
-```bash
-# Run backup script
-.\deploy\scripts\backup-restore\backup-pvc.sh
-
-# Specify namespace
-$env:NAMESPACE="nrdot-lab"; .\deploy\scripts\backup-restore\backup-pvc.sh
-```
-
-### Restore PVCs
-```bash
-# Restore a specific PVC from backup
-.\deploy\scripts\backup-restore\restore-pvc.sh fb-dp-data C:\backups\fb-dp-data-20250509-120000.tar.gz
-```
-
-## Useful Kubernetes Commands
-
-```bash
-# Get logs for a pod
-kubectl logs <pod-name>
-
-# Get logs for a specific container in a pod
-kubectl logs <pod-name> -c <container-name>
-
-# Forward ports to a pod
-kubectl port-forward <pod-name> 8080:2112
-
-# Describe a pod to see its status
-kubectl describe pod <pod-name>
-
-# Exec into a pod
-kubectl exec -it <pod-name> -- sh
-
-# Watch pod status
-kubectl get pods -w
-```
-
-## Git Commands
-
-```bash
-# Check status of files
-git status
+```powershell
+# Clone repository
+git clone https://github.com/newrelic/nrdot-internal-devlab.git
+cd nrdot-internal-devlab
 
 # Create a new branch
-git checkout -b feature/new-feature
+git checkout -b feature/your-feature-name
+
+# Check status
+git status
+
+# Add changes
+git add .
 
 # Commit changes
-git add .
 git commit -m "Description of changes"
 
-# Push to remote
-git push origin feature/new-feature
-
-# Pull latest changes
-git pull
+# Push changes
+git push origin feature/your-feature-name
 ```
 
-## Performance Testing
+### File Operations
+
+```powershell
+# List files
+dir
+# or for a more unix-like experience using PowerShell
+ls
+
+# Change directory
+cd path\to\directory
+
+# Create directory
+mkdir new-directory
+
+# Find files
+Get-ChildItem -Recurse -Filter *.go | Select-String -Pattern "pattern"
+# or shorter version
+ls -r *.go | Select-String "pattern"
+
+# Check file content
+type file.go
+# or
+cat file.go
+```
+
+### Docker and Kubernetes
+
+```powershell
+# Docker commands work the same in Windows PowerShell
+docker-compose up -d
+
+# Kubernetes commands work the same in Windows PowerShell
+kubectl apply -f deploy/k8s/crds/
+```
+
+### Go Commands
+
+```powershell
+# Go commands work the same in Windows PowerShell
+go mod download
+go test ./...
+go build -o bin/fb-rx.exe ./cmd/fb/rx
+```
+
+## Utility Commands
+
+### Monitoring
 
 ```bash
-# Run load generator
-cd pkg/test/loadgen
-go run main.go --rate=100 --target=nrdot-devlab-fb-rx:4317
+# Check Prometheus metrics for a Function Block
+curl http://localhost:2113/metrics  # For FB-RX
 
-# Check metrics
-curl http://nrdot-devlab-fb-rx:2112/metrics | findstr fb_rx
+# Check health endpoint
+curl http://localhost:2113/health   # For FB-RX
 ```
 
-## Tools for Windows
+### Configuration
 
-Remember that Windows uses different commands than Unix/Linux systems:
-- Use `dir` instead of `ls`
-- Use `type` instead of `cat`
-- Use `copy` instead of `cp`
-- Use `move` instead of `mv`
-- Use `del` instead of `rm`
-- Use `mkdir` instead of `mkdir -p` for creating directories
+```bash
+# Apply a new CRD configuration
+kubectl apply -f deploy/examples/pipeline-config.yaml
 
-Windows PowerShell provides additional Unix-like commands:
-- `ls` (aliased to `Get-ChildItem`)
-- `cat` (aliased to `Get-Content`)
-- `cp` (aliased to `Copy-Item`)
-- `mv` (aliased to `Move-Item`)
-- `rm` (aliased to `Remove-Item`)
+# Check the status of the CRD
+kubectl get nrdotpluspipeline
+
+# Describe the CRD for more details
+kubectl describe nrdotpluspipeline my-pipeline
+```
+
+### Backup and Restore
+
+```bash
+# Run backup script for persistence volume
+./deploy/scripts/backup-pvc.sh fb-dp
+
+# Restore from backup
+./deploy/scripts/restore-pvc.sh fb-dp backup-file.tar.gz
+```
+
+### DLQ Management
+
+```bash
+# Run the DLQ replay tool
+docker-compose run --rm dlq-replay --dlq-path=/data --fb-rx-addr=fb-rx:5000 --dry-run
+
+# Check DLQ metrics
+curl http://localhost:2122/metrics
+```

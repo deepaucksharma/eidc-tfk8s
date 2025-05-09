@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -82,7 +83,7 @@ func main() {
 	})
 
 	metricsServer := &http.Server{
-		Addr:    ":" + string(*metricsPort),
+		Addr:    fmt.Sprintf(":%d", *metricsPort),
 		Handler: nil,
 	}
 

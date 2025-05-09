@@ -361,3 +361,13 @@ func (r *RX) Shutdown(ctx context.Context) error {
 
 	return nil
 }
+
+// SetNextFBClientForTesting sets the next FB client for testing purposes
+func (r *RX) SetNextFBClientForTesting(client fb.ChainPushServiceClient) {
+	r.nextFBClient = client
+}
+
+// SetDLQClientForTesting sets the DLQ client for testing purposes
+func (r *RX) SetDLQClientForTesting(client fb.ChainPushServiceClient) {
+	r.dlqClient = client
+}

@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nrdot.fullname" . }}-fb-cl
+  labels:
+    {{- include "nrdot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fb-cl
+spec:
+  {{- if not .Values.fb.cl.autoscaling.enabled }}
+  replicas: {{ .Values.fb.cl.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "nrdot.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: fb-cl
+  template:
+    metadata:
+      labels:
+        {{- include "nrdot.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: fb-cl
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.fb.common.ports.metrics }}"
+    spec:
+      containers:
+        - name: fb-cl
+          image: "{{ .Values.global.registry }}/{{ .Values.fb.cl.image.repository }}:{{ .Values.fb.cl.image.tag | default .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.fb.common.ports.metrics }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.fb.common.ports.grpc }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: {{ .Values.fb.common.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fb.common.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            initialDelaySeconds: {{ .Values.fb.common.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fb.common.probes.readiness.periodSeconds }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONFIG_SERVICE
+              value: "{{ include "nrdot.fullname" . }}-config-controller:{{ .Values.fb.common.ports.grpc }}"
+            - name: NEXT_FB
+              value: "{{ include "nrdot.fullname" . }}-fb-dp:{{ .Values.fb.common.ports.grpc }}"
+            - name: DLQ_SERVICE
+              value: "{{ include "nrdot.fullname" . }}-fb-dlq:{{ .Values.fb.common.ports.grpc }}"
+            - name: OTLP_EXPORTER_ENDPOINT
+              value: {{ .Values.global.observability.otlpEndpoint }}
+            - name: TRACE_SAMPLING_RATIO
+              value: "{{ .Values.global.observability.traceSamplingRatio }}"
+          args:
+            - "--grpc-port={{ .Values.fb.common.ports.grpc }}"
+            - "--metrics-port={{ .Values.fb.common.ports.metrics }}"
+            - "--config-service=$(CONFIG_SERVICE)"
+            - "--next-fb=$(NEXT_FB)"
+            - "--dlq-service=$(DLQ_SERVICE)"
+            - "--otlp-exporter=$(OTLP_EXPORTER_ENDPOINT)"
+            - "--trace-sampling-ratio=$(TRACE_SAMPLING_RATIO)"
+            - "--salt-secret-name={{ .Values.fb.cl.piiSalt.secretName }}"
+            - "--salt-secret-key={{ .Values.fb.cl.piiSalt.secretKey }}"
+          resources:
+            {{- toYaml .Values.fb.cl.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+{{- if .Values.fb.cl.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "nrdot.fullname" . }}-fb-cl
+  labels:
+    {{- include "nrdot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fb-cl
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "nrdot.fullname" . }}-fb-cl
+  minReplicas: {{ .Values.fb.cl.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.fb.cl.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.fb.cl.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nrdot.fullname" . }}-fb-cl
+  labels:
+    {{- include "nrdot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fb-cl
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.fb.common.ports.grpc }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    - port: {{ .Values.fb.common.ports.metrics }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "nrdot.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: fb-cl
+---
+# Create a Secret for the PII salt
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.fb.cl.piiSalt.secretName }}
+  labels:
+    {{- include "nrdot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fb-cl
+type: Opaque
+stringData:
+  {{ .Values.fb.cl.piiSalt.secretKey }}: {{ randAlphaNum 32 | quote }}
