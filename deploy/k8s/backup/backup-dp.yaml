@@ -1,0 +1,66 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-dp
+  labels:
+    app.kubernetes.io/name: nrdot-backup-dp
+    app.kubernetes.io/instance: nrdot
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "0 1 * * *"  # Run at 1 AM every day
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup
+            image: busybox:1.35
+            imagePullPolicy: IfNotPresent
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -ex
+              TIMESTAMP=$(date +%Y%m%d%H%M%S)
+              BACKUP_FILE="/backups/fb-dp-${TIMESTAMP}.tar.gz"
+              
+              # Create temporary backup directory
+              mkdir -p /tmp/backup
+              
+              # Run badger backup command
+              echo "Running badger backup for FB-DP"
+              # TODO: Use badger backup command with exec into FB-DP pod
+              # kubectl exec -n ${NAMESPACE} ${DP_POD} -- badger backup -f /tmp/backup.gz
+              
+              # For now, simulate by tarring the PVC
+              echo "Creating backup from PVC"
+              cp -R /data/* /tmp/backup/
+              tar -czf ${BACKUP_FILE} -C /tmp/backup .
+              
+              # Cleanup
+              rm -rf /tmp/backup
+              
+              # List backups
+              echo "Backup completed successfully:"
+              ls -lah ${BACKUP_FILE}
+              
+              # Retention: Keep only last 7 backups
+              echo "Cleaning up old backups"
+              ls -t /backups/fb-dp-*.tar.gz | tail -n +8 | xargs rm -f
+            volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+            - name: backup
+              mountPath: /backups
+          volumes:
+          - name: data
+            persistentVolumeClaim:
+              claimName: fb-dp-data
+          - name: backup
+            persistentVolumeClaim:
+              claimName: nrdot-backups
+          restartPolicy: OnFailure

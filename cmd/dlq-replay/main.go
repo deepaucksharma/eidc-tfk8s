@@ -2,16 +2,21 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
+	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -39,6 +44,29 @@ var (
 	waitMs          = flag.Int("wait-ms", 0, "Milliseconds to wait between batches")
 	deleteReplayed  = flag.Bool("delete-replayed", false, "Delete messages after replay")
 )
+
+// DLQMessage is the structure of a message stored in the DLQ
+type DLQMessage struct {
+	BatchID        string            `json:"batch_id"`
+	Data           []byte            `json:"data"`
+	Format         string            `json:"format"`
+	Timestamp      time.Time         `json:"timestamp"`
+	ErrorCode      string            `json:"error_code"`
+	ErrorMessage   string            `json:"error_message"`
+	FBSender       string            `json:"fb_sender"`
+	InternalLabels map[string]string `json:"internal_labels"`
+	Metadata       map[string]string `json:"metadata"`
+}
+
+// ReplayStats tracks replay statistics
+type ReplayStats struct {
+	mu             sync.Mutex
+	total          int
+	filtered       int
+	replayed       int
+	errors         int
+	errorsByReason map[string]int
+}
 
 func main() {
 	// Parse command line flags
@@ -87,7 +115,7 @@ func main() {
 
 	// Connect to FB-RX
 	var fbRxConn *grpc.ClientConn
-	var fbRxClient interface{} // Would be fb.ChainPushServiceClient in a real implementation
+	var fbRxClient fb.ChainPushServiceClient
 
 	if !*dryRun {
 		logger.Info("Connecting to FB-RX", map[string]interface{}{"addr": *fbRxAddr})
@@ -100,66 +128,243 @@ func main() {
 			logger.Fatal("Failed to connect to FB-RX", err, nil)
 		}
 		defer fbRxConn.Close()
-		// fbRxClient = fb.NewChainPushServiceClient(fbRxConn)
+		fbRxClient = fb.NewChainPushServiceClient(fbRxConn)
+	}
+
+	// Initialize stats
+	stats := &ReplayStats{
+		errorsByReason: make(map[string]int),
 	}
 
 	// Open DLQ storage
 	if *dlqBackend == "leveldb" {
-		// Ensure directory exists
-		if err := os.MkdirAll(*dlqPath, 0755); err != nil {
-			logger.Fatal("Failed to create DLQ directory", err, nil)
-		}
-
-		// Open LevelDB
-		db, err := leveldb.OpenFile(*dlqPath, nil)
+		err := replayFromLevelDB(ctx, logger, fbRxClient, stats, since, until)
 		if err != nil {
-			logger.Fatal("Failed to open LevelDB", err, nil)
+			logger.Fatal("Failed to replay from LevelDB", err, nil)
 		}
-		defer db.Close()
-
-		// Count messages
-		count := 0
-		iter := db.NewIterator(nil, nil)
-		for iter.Next() {
-			count++
-		}
-		iter.Release()
-
-		logger.Info("Opened DLQ database", map[string]interface{}{"count": count, "path": *dlqPath})
-
-		// Find messages to replay based on filters
-		filtered := 0
-		iter = db.NewIterator(nil, nil)
-		defer iter.Release()
-
-		for iter.Next() {
-			// In a real implementation, this would:
-			// 1. Check if the message matches the filters (time, error code, FB sender)
-			// 2. Parse the message and extract the batch
-			// 3. Send the batch to FB-RX if not in dry-run mode
-			// 4. Delete the message if deleteReplayed is true
-			
-			filtered++
-		}
-
-		if err := iter.Error(); err != nil {
-			logger.Error("Error iterating DLQ", err, nil)
-		}
-
-		logger.Info("Replay statistics", map[string]interface{}{
-			"total":     count,
-			"filtered":  filtered,
-			"replayed":  0, // Would be actual count in real implementation
-			"errors":    0, // Would be error count in real implementation
-			"dry_run":   *dryRun,
-		})
 	} else if *dlqBackend == "kafka" {
 		logger.Error("Kafka backend not implemented", fmt.Errorf("not implemented"), nil)
 	} else {
 		logger.Fatal("Unknown DLQ backend", fmt.Errorf("unknown DLQ backend: %s", *dlqBackend), nil)
 	}
 
-	logger.Info("DLQ replay complete", nil)
+	logger.Info("DLQ replay complete", map[string]interface{}{
+		"total":    stats.total,
+		"filtered": stats.filtered,
+		"replayed": stats.replayed,
+		"errors":   stats.errors,
+		"dry_run":  *dryRun,
+	})
+
+	// Print error counts by reason
+	if stats.errors > 0 {
+		for reason, count := range stats.errorsByReason {
+			logger.Info("Replay errors", map[string]interface{}{
+				"reason": reason,
+				"count":  count,
+			})
+		}
+	}
+}
+
+// replayFromLevelDB replays messages from a LevelDB DLQ
+func replayFromLevelDB(ctx context.Context, logger *logging.Logger, client fb.ChainPushServiceClient, stats *ReplayStats, since, until time.Time) error {
+	// Ensure directory exists
+	if err := os.MkdirAll(*dlqPath, 0755); err != nil {
+		return fmt.Errorf("failed to create DLQ directory: %w", err)
+	}
+
+	// Open LevelDB
+	db, err := leveldb.OpenFile(*dlqPath, nil)
+	if err != nil {
+		return fmt.Errorf("failed to open LevelDB: %w", err)
+	}
+	defer db.Close()
+
+	// Count total messages
+	count := 0
+	iter := db.NewIterator(nil, nil)
+	for iter.Next() {
+		count++
+	}
+	iter.Release()
+	if err := iter.Error(); err != nil {
+		return fmt.Errorf("error counting messages: %w", err)
+	}
+
+	stats.total = count
+	logger.Info("Opened DLQ database", map[string]interface{}{"count": count, "path": *dlqPath})
+
+	// Create a channel to receive messages to replay
+	messageCh := make(chan struct {
+		key   []byte
+		value []byte
+	}, *batchSize)
+
+	// Create a wait group for worker goroutines
+	var wg sync.WaitGroup
+
+	// Start worker goroutines
+	for i := 0; i < *concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range messageCh {
+				err := processMessage(ctx, logger, client, db, item.key, item.value, stats, since, until)
+				if err != nil {
+					logger.Error("Error processing message", err, nil)
+				}
+
+				// Wait if requested
+				if *waitMs > 0 {
+					time.Sleep(time.Duration(*waitMs) * time.Millisecond)
+				}
+			}
+		}()
+	}
+
+	// Iterate through messages and send to workers
+	iter = db.NewIterator(nil, nil)
+	defer iter.Release()
+
+	for iter.Next() {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			logger.Info("Context cancelled, stopping replay", nil)
+			break
+		default:
+		}
+
+		// Queue message for processing
+		messageCh <- struct {
+			key   []byte
+			value []byte
+		}{
+			key:   append([]byte{}, iter.Key()...),
+			value: append([]byte{}, iter.Value()...),
+		}
+	}
+
+	// Close channel and wait for workers to finish
+	close(messageCh)
+	wg.Wait()
+
+	if err := iter.Error(); err != nil {
+		return fmt.Errorf("error iterating DLQ: %w", err)
+	}
+
+	return nil
+}
+
+// processMessage processes a single message from the DLQ
+func processMessage(ctx context.Context, logger *logging.Logger, client fb.ChainPushServiceClient, db *leveldb.DB, key, value []byte, stats *ReplayStats, since, until time.Time) error {
+	// Parse message
+	var message DLQMessage
+	if err := json.Unmarshal(value, &message); err != nil {
+		stats.mu.Lock()
+		stats.errors++
+		stats.errorsByReason["unmarshal-error"]++
+		stats.mu.Unlock()
+		return fmt.Errorf("failed to unmarshal message: %w", err)
+	}
+
+	// Apply filters
+	if !matchesFilters(message, since, until) {
+		stats.mu.Lock()
+		stats.filtered++
+		stats.mu.Unlock()
+		return nil
+	}
+
+	// Extract batch info
+	if !*dryRun && client != nil {
+		// Add replay indicator to internal labels
+		if message.InternalLabels == nil {
+			message.InternalLabels = make(map[string]string)
+		}
+		message.InternalLabels["replay"] = "true"
+		message.InternalLabels["replay_timestamp"] = time.Now().Format(time.RFC3339)
+
+		// Create replay request
+		req := &fb.MetricBatchRequest{
+			BatchId:          message.BatchID,
+			Data:             message.Data,
+			Format:           message.Format,
+			Replay:           true,
+			ConfigGeneration: 0, // Will be determined by the receiving FB
+			Metadata:         message.Metadata,
+			InternalLabels:   message.InternalLabels,
+		}
+
+		// Send to FB-RX
+		resp, err := client.PushMetrics(ctx, req)
+		if err != nil {
+			stats.mu.Lock()
+			stats.errors++
+			stats.errorsByReason["grpc-error"]++
+			stats.mu.Unlock()
+			return fmt.Errorf("failed to send message to FB-RX: %w", err)
+		}
+
+		if resp.Status != fb.StatusSuccess {
+			stats.mu.Lock()
+			stats.errors++
+			stats.errorsByReason[string(resp.ErrorCode)]++
+			stats.mu.Unlock()
+			return fmt.Errorf("FB-RX returned error: %s (code: %s)", resp.ErrorMessage, resp.ErrorCode)
+		}
+
+		// Delete if requested
+		if *deleteReplayed {
+			if err := db.Delete(key, nil); err != nil {
+				logger.Error("Failed to delete replayed message", err, map[string]interface{}{
+					"batch_id": message.BatchID,
+				})
+			}
+		}
+
+		stats.mu.Lock()
+		stats.replayed++
+		stats.mu.Unlock()
+	} else {
+		// Dry run mode
+		stats.mu.Lock()
+		stats.replayed++
+		stats.mu.Unlock()
+
+		logger.Info("Dry run: would replay message", map[string]interface{}{
+			"batch_id":   message.BatchID,
+			"fb_sender":  message.FBSender,
+			"error_code": message.ErrorCode,
+			"timestamp":  message.Timestamp,
+		})
+	}
+
+	return nil
+}
+
+// matchesFilters checks if a message matches the specified filters
+func matchesFilters(message DLQMessage, since, until time.Time) bool {
+	// Time filter
+	if !since.IsZero() && message.Timestamp.Before(since) {
+		return false
+	}
+	if !until.IsZero() && message.Timestamp.After(until) {
+		return false
+	}
+
+	// Error code filter
+	if *errorCode != "" && message.ErrorCode != *errorCode {
+		return false
+	}
+
+	// FB sender filter
+	if *fbSender != "" && message.FBSender != *fbSender {
+		return false
+	}
+
+	return true
 }
 
 // parseTimeFilter parses a time filter string (e.g. "1h", "2d") into a time.Time

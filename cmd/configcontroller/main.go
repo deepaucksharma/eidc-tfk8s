@@ -11,15 +11,16 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+
+	pb "github.com/newrelic/nrdot-internal-devlab/pkg/api/protobuf"
 )
 
 // Build information, injected at build time
@@ -134,11 +135,12 @@ func main() {
 
 	// Initialize gRPC server
 	server := grpc.NewServer()
-	// TODO: Register the ConfigService server implementation
-	// protobuf.RegisterConfigServiceServer(server, &ConfigServiceServer{})
+	// Create and register ConfigController as the ConfigService implementation
+	configController := NewConfigController(logger, clientset, *namespace)
+	pb.RegisterConfigServiceServer(server, configController)
 
 	// Start gRPC server
-	lis, err := net.Listen("tcp", ":"+string(*grpcPort))
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *grpcPort))
 	if err != nil {
 		logger.Printf(`{"level":"error","timestamp":"%s","message":"Failed to listen on gRPC port","error":"%s"}`,
 			time.Now().Format(time.RFC3339), err)
@@ -178,8 +180,8 @@ func main() {
 			OnStartedLeading: func(ctx context.Context) {
 				logger.Printf(`{"level":"info","timestamp":"%s","message":"Started leading","id":"%s"}`,
 					time.Now().Format(time.RFC3339), *id)
-				// TODO: Start the controller when we become leader
-				runController(ctx, clientset, *namespace, logger)
+				// Start the controller when we become leader
+				runController(ctx, configController, clientset, *namespace, logger)
 			},
 			OnStoppedLeading: func() {
 				logger.Printf(`{"level":"info","timestamp":"%s","message":"Stopped leading","id":"%s"}`,
@@ -216,44 +218,25 @@ func main() {
 }
 
 // runController runs the main controller loop that watches for pipeline resources and distributes configuration
-func runController(ctx context.Context, clientset *kubernetes.Clientset, namespace string, logger *log.Logger) {
-	// TODO: Implement controller logic to watch NRDotPlusPipeline CRDs and distribute config to FBs
+func runController(ctx context.Context, configController *ConfigController, clientset *kubernetes.Clientset, namespace string, logger *log.Logger) {
 	logger.Printf(`{"level":"info","timestamp":"%s","message":"Starting controller for namespace","namespace":"%s"}`,
 		time.Now().Format(time.RFC3339), namespace)
 
-	// Just a placeholder for now
+	// Create CRD controller
+	crdController, err := NewCRDController(logger, configController, clientset, namespace)
+	if err != nil {
+		logger.Printf(`{"level":"error","timestamp":"%s","message":"Failed to create CRD controller","error":"%s"}`,
+			time.Now().Format(time.RFC3339), err)
+		return
+	}
+
+	// Start CRD controller
+	if err := crdController.Start(ctx); err != nil {
+		logger.Printf(`{"level":"error","timestamp":"%s","message":"Failed to start CRD controller","error":"%s"}`,
+			time.Now().Format(time.RFC3339), err)
+		return
+	}
+
+	// Wait for context cancellation
 	<-ctx.Done()
-}
-
-// ConfigServiceServer implements the ConfigService gRPC service
-type ConfigServiceServer struct {
-	// TODO: Add fields for managing connections, configurations, etc.
-}
-
-// GetConfig implements the GetConfig method of the ConfigService
-func (s *ConfigServiceServer) GetConfig(ctx context.Context, req *ConfigRequest) (*ConfigResponse, error) {
-	// TODO: Implement GetConfig
-	return nil, status.Errorf(codes.Unimplemented, "method GetConfig not implemented")
-}
-
-// StreamConfig implements the StreamConfig method of the ConfigService
-func (s *ConfigServiceServer) StreamConfig(req *ConfigRequest, stream ConfigService_StreamConfigServer) error {
-	// TODO: Implement StreamConfig
-	return status.Errorf(codes.Unimplemented, "method StreamConfig not implemented")
-}
-
-// AckConfig implements the AckConfig method of the ConfigService
-func (s *ConfigServiceServer) AckConfig(ctx context.Context, req *ConfigAckRequest) (*ConfigAckResponse, error) {
-	// TODO: Implement AckConfig
-	return nil, status.Errorf(codes.Unimplemented, "method AckConfig not implemented")
-}
-
-// Placeholder types until the protobuf-generated code is available
-type ConfigRequest struct{}
-type ConfigResponse struct{}
-type ConfigAckRequest struct{}
-type ConfigAckResponse struct{}
-type ConfigService_StreamConfigServer interface {
-	Send(*ConfigResponse) error
-	grpc.ServerStream
 }

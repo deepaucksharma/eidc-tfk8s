@@ -1,4 +1,4 @@
-package enhost
+package dp
 
 import (
 	"context"
@@ -17,23 +17,24 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// ENHostConfig contains configuration for the Host Enrichment function block
-type ENHostConfig struct {
+// DPConfig contains configuration for the Deduplication function block
+type DPConfig struct {
 	// Common configuration
 	Common config.FBConfig `json:"common"`
 
-	// EN-HOST-specific configuration
-	Enabled  bool   `json:"enabled"`
-	CacheTTL string `json:"cacheTTL"`
+	// DP-specific configuration
+	Enabled     bool   `json:"enabled"`
+	GCInterval  string `json:"gcInterval"`
+	StoragePath string `json:"storagePath"`
 }
 
-// ENHost implements the FB-EN-HOST (Host Enrichment) function block
-type ENHost struct {
+// DP implements the FB-DP (Deduplication) function block
+type DP struct {
 	fb.BaseFunctionBlock
 	logger          *logging.Logger
 	metrics         *metrics.FBMetrics
 	tracer          *tracing.Tracer
-	config          *ENHostConfig
+	config          *DPConfig
 	configMu        sync.RWMutex
 	nextFBClient    fb.ChainPushServiceClient
 	nextFBConn      *grpc.ClientConn
@@ -42,74 +43,62 @@ type ENHost struct {
 	circuitBreaker  *resilience.CircuitBreaker
 }
 
-// NewENHost creates a new Host Enrichment function block
-func NewENHost() *ENHost {
-	return &ENHost{
+// NewDP creates a new Deduplication function block
+func NewDP() *DP {
+	return &DP{
 		BaseFunctionBlock: fb.BaseFunctionBlock{
-			name:  "fb-en-host",
+			name:  "fb-dp",
 			ready: false,
 		},
-		logger:  logging.NewLogger("fb-en-host"),
-		metrics: metrics.NewFBMetrics("fb-en-host"),
-		tracer:  tracing.NewTracer("fb-en-host"),
+		logger:  logging.NewLogger("fb-dp"),
+		metrics: metrics.NewFBMetrics("fb-dp"),
+		tracer:  tracing.NewTracer("fb-dp"),
 	}
 }
 
-// Initialize initializes the Host Enrichment function block
-func (e *ENHost) Initialize(ctx context.Context) error {
-	e.logger.Info("Initializing FB-EN-HOST", nil)
+// Initialize initializes the Deduplication function block
+func (d *DP) Initialize(ctx context.Context) error {
+	d.logger.Info("Initializing FB-DP", nil)
 
 	// Initialize circuit breaker with default config
-	e.circuitBreaker = resilience.NewCircuitBreaker("fb-en-host", resilience.DefaultCircuitBreakerConfig())
+	d.circuitBreaker = resilience.NewCircuitBreaker("fb-dp", resilience.DefaultCircuitBreakerConfig())
 
 	// Mark as ready (full readiness will be set after config is loaded)
-	e.BaseFunctionBlock.ready = true
+	d.BaseFunctionBlock.ready = true
 
 	return nil
 }
 
 // ProcessBatch processes a batch of metrics
-func (e *ENHost) ProcessBatch(ctx context.Context, batch *fb.MetricBatch) (*fb.ProcessResult, error) {
+func (d *DP) ProcessBatch(ctx context.Context, batch *fb.MetricBatch) (*fb.ProcessResult, error) {
 	// Create child span for the batch processing
-	ctx, span := e.tracer.StartSpan(ctx, "process-batch", map[string]string{
-		"batch_id": batch.BatchID,
-	})
+	ctx, span := d.tracer.StartSpan(ctx, "process-batch", nil)
 	defer span.End()
 
 	// Record metric
-	e.metrics.RecordBatchReceived()
+	d.metrics.RecordBatchReceived()
 
 	startTime := time.Now()
 
-	// Ensure batch_id is in the span context
-	ctx = e.tracer.ContextWithAttributes(ctx, map[string]string{
-		"batch_id": batch.BatchID,
-		"fb.name":  e.Name(),
-	})
-
 	// Process batch
-	processingErr := e.processBatch(ctx, batch)
+	processingErr := d.processBatch(ctx, batch)
 	if processingErr != nil {
-		e.metrics.RecordProcessingError()
-		e.tracer.RecordError(ctx, processingErr)
+		d.metrics.RecordProcessingError()
 		return fb.NewErrorResult(batch.BatchID, fb.ErrorCodeProcessingFailed, processingErr, false), processingErr
 	}
 
 	// Record processing metrics
-	e.metrics.RecordBatchProcessed(time.Since(startTime).Seconds())
+	d.metrics.RecordBatchProcessed(time.Since(startTime).Seconds())
 
 	// Forward to next FB
-	forwardingResult, forwardingErr := e.forwardToNextFB(ctx, batch)
+	forwardingResult, forwardingErr := d.forwardToNextFB(ctx, batch)
 	if forwardingErr != nil {
-		e.tracer.RecordError(ctx, forwardingErr)
-
 		// If forwarding fails but processing succeeded, attempt to send to DLQ
-		dlqErr := e.sendToDLQ(ctx, batch, forwardingErr)
+		dlqErr := d.sendToDLQ(ctx, batch, forwardingErr)
 		if dlqErr != nil {
-			e.logger.Error("Failed to send to DLQ after forwarding failure", dlqErr, map[string]interface{}{
+			d.logger.Error("Failed to send to DLQ after forwarding failure", dlqErr, map[string]interface{}{
 				"batch_id": batch.BatchID,
 			})
-			e.tracer.RecordError(ctx, dlqErr)
 			return fb.NewErrorResult(batch.BatchID, fb.ErrorCodeDLQSendFailed, dlqErr, false), dlqErr
 		}
 		
@@ -121,39 +110,39 @@ func (e *ENHost) ProcessBatch(ctx context.Context, batch *fb.MetricBatch) (*fb.P
 }
 
 // processBatch performs the actual batch processing
-func (e *ENHost) processBatch(ctx context.Context, batch *fb.MetricBatch) error {
-	// Create child span for enrichment
-	ctx, span := e.tracer.StartSpan(ctx, "host-enrichment", nil)
+func (d *DP) processBatch(ctx context.Context, batch *fb.MetricBatch) error {
+	// Create child span for deduplication
+	ctx, span := d.tracer.StartSpan(ctx, "deduplication", nil)
 	defer span.End()
 
-	// TODO: Implement host-level enrichment logic here
+	// TODO: Implement deduplication logic here
 	// This would involve:
-	// 1. Extracting host information for each metric
-	// 2. Looking up additional host metadata (OS, CPU, memory, etc.)
-	// 3. Enriching metrics with this metadata
+	// 1. Calculating hash for each metric in the batch
+	// 2. Checking against BadgerDB store if we've seen this hash before
+	// 3. Filtering out duplicates from the batch
 
 	return nil
 }
 
 // forwardToNextFB forwards the batch to the next function block
-func (e *ENHost) forwardToNextFB(ctx context.Context, batch *fb.MetricBatch) (*fb.ProcessResult, error) {
+func (d *DP) forwardToNextFB(ctx context.Context, batch *fb.MetricBatch) (*fb.ProcessResult, error) {
 	startTime := time.Now()
 
-	// Create child span for forwarding
-	ctx, span := e.tracer.StartSpan(ctx, "forward-to-next-fb", nil)
-	defer span.End()
-
 	// Use circuit breaker to protect against downstream failures
-	err := e.circuitBreaker.Execute(ctx, func(ctx context.Context) error {
+	err := d.circuitBreaker.Execute(ctx, func(ctx context.Context) error {
 		// Get the current config
-		e.configMu.RLock()
-		nextFB := e.config.Common.NextFB
-		e.configMu.RUnlock()
+		d.configMu.RLock()
+		nextFB := d.config.Common.NextFB
+		d.configMu.RUnlock()
 
 		// Ensure we have a connection to the next FB
-		if e.nextFBClient == nil {
+		if d.nextFBClient == nil {
 			return fmt.Errorf("no connection to next FB: %s", nextFB)
 		}
+
+		// Create child span for forwarding
+		ctx, span := d.tracer.StartSpan(ctx, "forward-to-next-fb", nil)
+		defer span.End()
 
 		// Convert to ChainPushService request
 		req := &fb.MetricBatchRequest{
@@ -167,7 +156,7 @@ func (e *ENHost) forwardToNextFB(ctx context.Context, batch *fb.MetricBatch) (*f
 		}
 
 		// Forward to next FB
-		res, err := e.nextFBClient.PushMetrics(ctx, req)
+		res, err := d.nextFBClient.PushMetrics(ctx, req)
 		if err != nil {
 			return fmt.Errorf("failed to push metrics to next FB: %w", err)
 		}
@@ -181,7 +170,7 @@ func (e *ENHost) forwardToNextFB(ctx context.Context, batch *fb.MetricBatch) (*f
 	})
 
 	// Record metrics
-	e.metrics.RecordBatchForwarded(time.Since(startTime).Seconds())
+	d.metrics.RecordBatchForwarded(time.Since(startTime).Seconds())
 
 	if err != nil {
 		if err == resilience.ErrCircuitOpen {
@@ -194,13 +183,13 @@ func (e *ENHost) forwardToNextFB(ctx context.Context, batch *fb.MetricBatch) (*f
 }
 
 // sendToDLQ sends a batch to the Dead Letter Queue
-func (e *ENHost) sendToDLQ(ctx context.Context, batch *fb.MetricBatch, originalErr error) error {
+func (d *DP) sendToDLQ(ctx context.Context, batch *fb.MetricBatch, originalErr error) error {
 	// Create child span for DLQ
-	ctx, span := e.tracer.StartSpan(ctx, "send-to-dlq", nil)
+	ctx, span := d.tracer.StartSpan(ctx, "send-to-dlq", nil)
 	defer span.End()
 
 	// Ensure we have a connection to the DLQ
-	if e.dlqClient == nil {
+	if d.dlqClient == nil {
 		return fmt.Errorf("no connection to DLQ")
 	}
 
@@ -209,7 +198,7 @@ func (e *ENHost) sendToDLQ(ctx context.Context, batch *fb.MetricBatch, originalE
 		batch.InternalLabels = make(map[string]string)
 	}
 	batch.InternalLabels["error"] = originalErr.Error()
-	batch.InternalLabels["fb_sender"] = e.Name()
+	batch.InternalLabels["fb_sender"] = d.Name()
 
 	// Convert to ChainPushService request
 	req := &fb.MetricBatchRequest{
@@ -223,7 +212,7 @@ func (e *ENHost) sendToDLQ(ctx context.Context, batch *fb.MetricBatch, originalE
 	}
 
 	// Send to DLQ
-	res, err := e.dlqClient.PushMetrics(ctx, req)
+	res, err := d.dlqClient.PushMetrics(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to push metrics to DLQ: %w", err)
 	}
@@ -234,54 +223,54 @@ func (e *ENHost) sendToDLQ(ctx context.Context, batch *fb.MetricBatch, originalE
 	}
 
 	// Record metric
-	e.metrics.RecordBatchDLQ()
+	d.metrics.RecordBatchDLQ()
 
 	return nil
 }
 
-// UpdateConfig updates the Host Enrichment function block's configuration
-func (e *ENHost) UpdateConfig(ctx context.Context, configBytes []byte, generation int64) error {
+// UpdateConfig updates the Deduplication function block's configuration
+func (d *DP) UpdateConfig(ctx context.Context, configBytes []byte, generation int64) error {
 	// Create child span for config update
-	ctx, span := e.tracer.StartSpan(ctx, "update-config", nil)
+	ctx, span := d.tracer.StartSpan(ctx, "update-config", nil)
 	defer span.End()
 
 	// Parse configuration
-	var newConfig ENHostConfig
+	var newConfig DPConfig
 	if err := json.Unmarshal(configBytes, &newConfig); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
 	// Validate configuration
-	if err := e.validateConfig(&newConfig); err != nil {
+	if err := d.validateConfig(&newConfig); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
 	// Apply configuration
-	e.configMu.Lock()
-	e.config = &newConfig
-	e.configGeneration = generation
-	e.configMu.Unlock()
+	d.configMu.Lock()
+	d.config = &newConfig
+	d.configGeneration = generation
+	d.configMu.Unlock()
 
 	// Update circuit breaker configuration
-	e.circuitBreaker = resilience.NewCircuitBreaker("fb-en-host", resilience.CircuitBreakerConfig{
+	d.circuitBreaker = resilience.NewCircuitBreaker("fb-dp", resilience.CircuitBreakerConfig{
 		ErrorThresholdPercentage: newConfig.Common.CircuitBreaker.ErrorThresholdPercentage,
 		OpenStateSeconds:         newConfig.Common.CircuitBreaker.OpenStateSeconds,
 		HalfOpenRequestThreshold: newConfig.Common.CircuitBreaker.HalfOpenRequestThreshold,
 	})
 
 	// Connect to next FB and DLQ if not already connected
-	if e.nextFBClient == nil {
-		if err := e.connectToNextFB(ctx, newConfig.Common.NextFB); err != nil {
-			e.logger.Error("Failed to connect to next FB", err, map[string]interface{}{
+	if d.nextFBClient == nil {
+		if err := d.connectToNextFB(ctx, newConfig.Common.NextFB); err != nil {
+			d.logger.Error("Failed to connect to next FB", err, map[string]interface{}{
 				"next_fb": newConfig.Common.NextFB,
 			})
 			// Don't fail config update on connection error - we'll retry on next batch
 		}
 	}
 
-	if e.dlqClient == nil {
-		if err := e.connectToDLQ(ctx, newConfig.Common.DLQ); err != nil {
-			e.logger.Error("Failed to connect to DLQ", err, map[string]interface{}{
+	if d.dlqClient == nil {
+		if err := d.connectToDLQ(ctx, newConfig.Common.DLQ); err != nil {
+			d.logger.Error("Failed to connect to DLQ", err, map[string]interface{}{
 				"dlq": newConfig.Common.DLQ,
 			})
 			// Don't fail config update on connection error - we'll retry when needed
@@ -289,20 +278,21 @@ func (e *ENHost) UpdateConfig(ctx context.Context, configBytes []byte, generatio
 	}
 
 	// Update metrics
-	e.metrics.SetConfigGeneration(generation)
-	e.metrics.SetReady(true)
+	d.metrics.SetConfigGeneration(generation)
+	d.metrics.SetReady(true)
 
-	e.logger.Info("Config updated", map[string]interface{}{
-		"generation": generation,
-		"enabled":    newConfig.Enabled,
-		"cache_ttl":  newConfig.CacheTTL,
+	d.logger.Info("Config updated", map[string]interface{}{
+		"generation":  generation,
+		"enabled":     newConfig.Enabled,
+		"gc_interval": newConfig.GCInterval,
+		"storage_path": newConfig.StoragePath,
 	})
 
 	return nil
 }
 
-// validateConfig validates the Host Enrichment function block's configuration
-func (e *ENHost) validateConfig(config *ENHostConfig) error {
+// validateConfig validates the Deduplication function block's configuration
+func (d *DP) validateConfig(config *DPConfig) error {
 	// Check if next FB is configured
 	if config.Common.NextFB == "" {
 		return fmt.Errorf("next FB not configured")
@@ -313,16 +303,21 @@ func (e *ENHost) validateConfig(config *ENHostConfig) error {
 		return fmt.Errorf("DLQ not configured")
 	}
 
+	// Check storage path
+	if config.StoragePath == "" {
+		return fmt.Errorf("storage path not configured")
+	}
+
 	return nil
 }
 
 // connectToNextFB establishes a connection to the next function block
-func (e *ENHost) connectToNextFB(ctx context.Context, nextFB string) error {
+func (d *DP) connectToNextFB(ctx context.Context, nextFB string) error {
 	// Close existing connection if any
-	if e.nextFBConn != nil {
-		e.nextFBConn.Close()
-		e.nextFBConn = nil
-		e.nextFBClient = nil
+	if d.nextFBConn != nil {
+		d.nextFBConn.Close()
+		d.nextFBConn = nil
+		d.nextFBClient = nil
 	}
 
 	// Create new connection
@@ -334,19 +329,19 @@ func (e *ENHost) connectToNextFB(ctx context.Context, nextFB string) error {
 		return fmt.Errorf("failed to connect to next FB: %w", err)
 	}
 
-	e.nextFBConn = conn
-	e.nextFBClient = fb.NewChainPushServiceClient(conn)
+	d.nextFBConn = conn
+	d.nextFBClient = fb.NewChainPushServiceClient(conn)
 	
 	return nil
 }
 
 // connectToDLQ establishes a connection to the DLQ function block
-func (e *ENHost) connectToDLQ(ctx context.Context, dlqAddr string) error {
+func (d *DP) connectToDLQ(ctx context.Context, dlqAddr string) error {
 	// Close existing connection if any
-	if e.dlqConn != nil {
-		e.dlqConn.Close()
-		e.dlqConn = nil
-		e.dlqClient = nil
+	if d.dlqConn != nil {
+		d.dlqConn.Close()
+		d.dlqConn = nil
+		d.dlqClient = nil
 	}
 
 	// Create new connection
@@ -358,31 +353,31 @@ func (e *ENHost) connectToDLQ(ctx context.Context, dlqAddr string) error {
 		return fmt.Errorf("failed to connect to DLQ: %w", err)
 	}
 
-	e.dlqConn = conn
-	e.dlqClient = fb.NewChainPushServiceClient(conn)
+	d.dlqConn = conn
+	d.dlqClient = fb.NewChainPushServiceClient(conn)
 	
 	return nil
 }
 
-// Shutdown shuts down the Host Enrichment function block
-func (e *ENHost) Shutdown(ctx context.Context) error {
-	e.logger.Info("Shutting down FB-EN-HOST", nil)
+// Shutdown shuts down the Deduplication function block
+func (d *DP) Shutdown(ctx context.Context) error {
+	d.logger.Info("Shutting down FB-DP", nil)
 
 	// Close connections
-	if e.nextFBConn != nil {
-		e.nextFBConn.Close()
-		e.nextFBConn = nil
-		e.nextFBClient = nil
+	if d.nextFBConn != nil {
+		d.nextFBConn.Close()
+		d.nextFBConn = nil
+		d.nextFBClient = nil
 	}
 
-	if e.dlqConn != nil {
-		e.dlqConn.Close()
-		e.dlqConn = nil
-		e.dlqClient = nil
+	if d.dlqConn != nil {
+		d.dlqConn.Close()
+		d.dlqConn = nil
+		d.dlqClient = nil
 	}
 
 	// Mark as not ready
-	e.BaseFunctionBlock.ready = false
+	d.BaseFunctionBlock.ready = false
 
 	return nil
 }
@@ -390,11 +385,11 @@ func (e *ENHost) Shutdown(ctx context.Context) error {
 // Testing helpers
 
 // SetNextFBClientForTesting sets the next FB client for testing purposes
-func (e *ENHost) SetNextFBClientForTesting(client fb.ChainPushServiceClient) {
-	e.nextFBClient = client
+func (d *DP) SetNextFBClientForTesting(client fb.ChainPushServiceClient) {
+	d.nextFBClient = client
 }
 
 // SetDLQClientForTesting sets the DLQ client for testing purposes
-func (e *ENHost) SetDLQClientForTesting(client fb.ChainPushServiceClient) {
-	e.dlqClient = client
+func (d *DP) SetDLQClientForTesting(client fb.ChainPushServiceClient) {
+	d.dlqClient = client
 }

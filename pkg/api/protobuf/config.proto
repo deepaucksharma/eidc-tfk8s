@@ -1,68 +1,126 @@
 syntax = "proto3";
 
-package nrdot.api.v1;
+package config;
 
-option go_package = "github.com/newrelic/nrdot-internal-devlab/pkg/api/protobuf;protobuf";
+option go_package = "github.com/newrelic/nrdot-internal-devlab/pkg/api/protobuf";
 
-// ConfigService manages configuration for Function Blocks
+// ConfigService provides configuration management for function blocks
 service ConfigService {
-  // GetConfig retrieves the latest configuration for a Function Block
-  rpc GetConfig(ConfigRequest) returns (ConfigResponse) {}
+  // GetConfig retrieves the current configuration for a function block
+  rpc GetConfig(ConfigRequest) returns (ConfigResponse);
   
-  // StreamConfig streams configuration updates to a Function Block
-  rpc StreamConfig(ConfigRequest) returns (stream ConfigResponse) {}
+  // StreamConfig provides a stream of configuration updates to a function block
+  rpc StreamConfig(ConfigRequest) returns (stream ConfigResponse);
   
-  // AckConfig acknowledges that a configuration was successfully applied
-  rpc AckConfig(ConfigAckRequest) returns (ConfigAckResponse) {}
+  // AckConfig acknowledges that a configuration has been applied
+  rpc AckConfig(ConfigAckRequest) returns (ConfigAckResponse);
 }
 
-// ConfigRequest is used to request configuration for a specific FB
-message ConfigRequest {
-  // The name of the FB requesting configuration
-  string fb_name = 1;
-  
-  // The instance ID of the FB (typically the pod name)
-  string instance_id = 2;
-  
-  // The last known configuration generation
-  int64 last_known_generation = 3;
-}
+// Common configuration structures
 
-// ConfigResponse contains configuration data for an FB
-message ConfigResponse {
-  // The configuration generation number
+// PipelineConfig represents the complete pipeline configuration
+message PipelineConfig {
+  // Generation number, incremented with each config change
   int64 generation = 1;
   
-  // FB-specific configuration
-  bytes config = 2;
+  // Pipeline version for compatibility checks
+  string pipeline_version = 2;
   
-  // Whether this config requires a restart to take effect
-  bool requires_restart = 3;
+  // Global settings for the entire pipeline
+  GlobalSettings global_settings = 3;
   
-  // Timestamp when this config was generated
-  int64 timestamp = 4;
+  // Function block specific configs
+  map<string, FBConfig> function_blocks = 4;
 }
 
-// ConfigAckRequest acknowledges receipt and application of a config
-message ConfigAckRequest {
-  // The FB name
-  string fb_name = 1;
+// GlobalSettings contains pipeline-wide configuration
+message GlobalSettings {
+  // Environment variable name for deterministic sampling seed
+  string deterministic_seed_env_var = 1;
   
-  // The instance ID
+  // Policy for handling internal labels
+  string internal_label_policy = 2;
+}
+
+// FBConfig contains the configuration for a specific function block
+message FBConfig {
+  // Whether this function block is enabled
+  bool enabled = 1;
+  
+  // Container image tag override
+  string image_tag = 2;
+  
+  // Function block specific parameters (JSON encoded)
+  bytes parameters = 3;
+  
+  // Circuit breaker configuration
+  CircuitBreakerConfig circuit_breaker = 4;
+}
+
+// CircuitBreakerConfig contains circuit breaker settings
+message CircuitBreakerConfig {
+  // Error threshold percentage to trip circuit breaker (1-100)
+  int32 error_threshold_percentage = 1;
+  
+  // Duration circuit stays open in seconds
+  int32 open_state_seconds = 2;
+  
+  // Number of requests to attempt in half-open state
+  int32 half_open_request_threshold = 3;
+}
+
+// Request/Response messages
+
+// ConfigRequest is used to request configuration
+message ConfigRequest {
+  // Function block ID
+  string fb_id = 1;
+  
+  // Function block instance ID
   string instance_id = 2;
   
-  // The generation being acknowledged
+  // Current config generation (0 for initial request)
+  int64 current_generation = 3;
+}
+
+// ConfigResponse contains configuration data
+message ConfigResponse {
+  // Status code (0 = success)
+  int32 status = 1;
+  
+  // Error message (if status != 0)
+  string error_message = 2;
+  
+  // Config generation number
   int64 generation = 3;
   
-  // Whether the config was successfully applied
+  // Full pipeline configuration
+  PipelineConfig pipeline_config = 4;
+}
+
+// ConfigAckRequest acknowledges config application
+message ConfigAckRequest {
+  // Function block ID
+  string fb_id = 1;
+  
+  // Function block instance ID
+  string instance_id = 2;
+  
+  // Applied config generation
+  int64 applied_generation = 3;
+  
+  // Success flag
   bool success = 4;
   
-  // Error message if not successful
+  // Error message (if !success)
   string error_message = 5;
 }
 
 // ConfigAckResponse is the response to a config acknowledgment
 message ConfigAckResponse {
-  // Whether the acknowledgment was recorded
-  bool recorded = 1;
+  // Status code (0 = success)
+  int32 status = 1;
+  
+  // Error message (if status != 0)
+  string error_message = 2;
 }

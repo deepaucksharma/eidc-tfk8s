@@ -2,6 +2,8 @@ package tracing
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -14,152 +16,128 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Tracer provides standardized tracing for function blocks
+// Tracer provides a simplified interface for creating traces
 type Tracer struct {
-	fbName     string
-	tracer     trace.Tracer
-	propagator propagation.TextMapPropagator
+	serviceName string
+	tracer      trace.Tracer
 }
 
-// InitTracer initializes the global OpenTelemetry tracer
-func InitTracer(ctx context.Context, serviceName, version, environment, exporterEndpoint string, samplingRatio float64) (func(), error) {
+// NewTracer creates a new tracer for the given service name
+func NewTracer(serviceName string) *Tracer {
+	return &Tracer{
+		serviceName: serviceName,
+		tracer:      otel.GetTracerProvider().Tracer(serviceName),
+	}
+}
+
+// InitTracer initializes the OpenTelemetry tracer provider
+func InitTracer(ctx context.Context, serviceName, serviceVersion, exporterEndpoint string, samplingRatio float64) (func(), error) {
+	if exporterEndpoint == "" {
+		exporterEndpoint = os.Getenv("OTLP_EXPORTER_ENDPOINT")
+		if exporterEndpoint == "" {
+			exporterEndpoint = "otel-collector:4317" // Default endpoint
+		}
+	}
+
 	// Create OTLP exporter
 	exporter, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithEndpoint(exporterEndpoint),
 		otlptracegrpc.WithInsecure(),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
 
 	// Create resource with service information
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(serviceName),
-			semconv.ServiceVersionKey.String(version),
-			attribute.String("environment", environment),
+			semconv.ServiceVersionKey.String(serviceVersion),
+			attribute.String("environment", os.Getenv("ENVIRONMENT")),
 		),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	// Create trace provider
+	// Create tracer provider
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(samplingRatio)),
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
 	)
 
-	// Set global trace provider
+	// Set global tracer provider and propagator
 	otel.SetTracerProvider(tp)
-
-	// Set global propagator to W3C TraceContext
-	propagator := propagation.NewCompositeTextMapPropagator(
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
-	)
-	otel.SetTextMapPropagator(propagator)
+	))
 
 	// Return shutdown function
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := tp.Shutdown(ctx); err != nil {
-			// Use stderr since logger might be unavailable during shutdown
-			// Format as JSON to maintain consistency
-			// TODO: Use logger if available
+			fmt.Printf("Error shutting down tracer provider: %v\n", err)
 		}
 	}, nil
 }
 
-// NewTracer creates a new tracer for the specified function block
-func NewTracer(fbName string) *Tracer {
-	return &Tracer{
-		fbName:     fbName,
-		tracer:     otel.Tracer("github.com/newrelic/nrdot-internal-devlab"),
-		propagator: otel.GetTextMapPropagator(),
+// StartSpan starts a new span with the given name and attributes
+func (t *Tracer) StartSpan(ctx context.Context, name string, attributes map[string]string) (context.Context, trace.Span) {
+	attrs := make([]attribute.KeyValue, 0, len(attributes))
+	for k, v := range attributes {
+		attrs = append(attrs, attribute.String(k, v))
 	}
+	return t.tracer.Start(ctx, fmt.Sprintf("%s.%s", t.serviceName, name), trace.WithAttributes(attrs...))
 }
 
-// StartSpan starts a new span with the specified name and attributes
-func (t *Tracer) StartSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
-	// Start with the FB name as prefix
-	fullName := t.fbName + "-" + name
-
-	// Add default attributes for all spans
-	defaultAttrs := []attribute.KeyValue{
-		attribute.String("fb_name", t.fbName),
+// ContextWithAttributes adds attributes to the current span
+func (t *Tracer) ContextWithAttributes(ctx context.Context, attributes map[string]string) context.Context {
+	span := trace.SpanFromContext(ctx)
+	for k, v := range attributes {
+		span.SetAttributes(attribute.String(k, v))
 	}
-
-	// Combine default attributes with provided attributes
-	allAttrs := append(defaultAttrs, attrs...)
-
-	// Start the span
-	return t.tracer.Start(ctx, fullName, trace.WithAttributes(allAttrs...))
+	return ctx
 }
 
-// ExtractSpanContext extracts the span context from the provided carrier
-func (t *Tracer) ExtractSpanContext(ctx context.Context, carrier propagation.TextMapCarrier) context.Context {
-	return t.propagator.Extract(ctx, carrier)
+// RecordError records an error in the current span
+func (t *Tracer) RecordError(ctx context.Context, err error) {
+	span := trace.SpanFromContext(ctx)
+	span.RecordError(err)
 }
 
-// InjectSpanContext injects the span context into the provided carrier
-func (t *Tracer) InjectSpanContext(ctx context.Context, carrier propagation.TextMapCarrier) {
-	t.propagator.Inject(ctx, carrier)
-}
-
-// RecordBatchProcessingSpan creates and records a span for batch processing
-func (t *Tracer) RecordBatchProcessingSpan(ctx context.Context, batchID string, processingFunc func(context.Context) error) error {
-	ctx, span := t.StartSpan(ctx, "process-batch",
-		attribute.String("batch_id", batchID),
-	)
-	defer span.End()
-
-	// Execute the processing function
-	err := processingFunc(ctx)
-
-	// Record error if any
-	if err != nil {
-		span.RecordError(err)
+// AddEvent adds an event to the current span
+func (t *Tracer) AddEvent(ctx context.Context, name string, attributes map[string]string) {
+	span := trace.SpanFromContext(ctx)
+	attrs := make([]attribute.KeyValue, 0, len(attributes))
+	for k, v := range attributes {
+		attrs = append(attrs, attribute.String(k, v))
 	}
-
-	return err
+	span.AddEvent(name, trace.WithAttributes(attrs...))
 }
 
-// RecordBatchForwardingSpan creates and records a span for batch forwarding
-func (t *Tracer) RecordBatchForwardingSpan(ctx context.Context, batchID string, nextFB string, forwardingFunc func(context.Context) error) error {
-	ctx, span := t.StartSpan(ctx, "forward-batch",
-		attribute.String("batch_id", batchID),
-		attribute.String("next_fb", nextFB),
-	)
-	defer span.End()
-
-	// Execute the forwarding function
-	err := forwardingFunc(ctx)
-
-	// Record error if any
-	if err != nil {
-		span.RecordError(err)
-	}
-
-	return err
+// SetStatus sets the status of the current span
+func (t *Tracer) SetStatus(ctx context.Context, code trace.StatusCode, description string) {
+	span := trace.SpanFromContext(ctx)
+	span.SetStatus(code, description)
 }
 
-// RecordConfigUpdateSpan creates and records a span for configuration updates
-func (t *Tracer) RecordConfigUpdateSpan(ctx context.Context, generation int64, updateFunc func(context.Context) error) error {
-	ctx, span := t.StartSpan(ctx, "update-config",
-		attribute.Int64("config_generation", generation),
-	)
-	defer span.End()
-
-	// Execute the update function
-	err := updateFunc(ctx)
-
-	// Record error if any
-	if err != nil {
-		span.RecordError(err)
+// GetTraceID returns the trace ID for the current span
+func (t *Tracer) GetTraceID(ctx context.Context) string {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return ""
 	}
+	return span.SpanContext().TraceID().String()
+}
 
-	return err
+// GetSpanID returns the span ID for the current span
+func (t *Tracer) GetSpanID(ctx context.Context) string {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return ""
+	}
+	return span.SpanContext().SpanID().String()
 }
