@@ -1,0 +1,237 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nrdotpluspipelines.nrdot.newrelic.com
+spec:
+  group: nrdot.newrelic.com
+  names:
+    kind: NRDotPlusPipeline
+    listKind: NRDotPlusPipelineList
+    plural: nrdotpluspipelines
+    singular: nrdotpluspipeline
+    shortNames:
+      - nrpl
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                rx:
+                  type: object
+                  properties:
+                    endpoints:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          protocol:
+                            type: string
+                            enum: ["otlp/grpc", "otlp/http", "prometheus/remote-write"]
+                          port:
+                            type: integer
+                            minimum: 1
+                            maximum: 65535
+                  required: ["endpoints"]
+                enrichment:
+                  type: object
+                  properties:
+                    host:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                        cacheTTL:
+                          type: string
+                          pattern: "^[0-9]+(m|s|h)$"
+                    kubernetes:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                        cacheTTL:
+                          type: string
+                          pattern: "^[0-9]+(m|s|h)$"
+                classification:
+                  type: object
+                  properties:
+                    piiFields:
+                      type: array
+                      items:
+                        type: string
+                    saltSecretName:
+                      type: string
+                    piiSaltVersion:
+                      type: integer
+                deduplication:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                    gcInterval:
+                      type: string
+                      pattern: "^[0-9]+(m|s|h)$"
+                    storagePath:
+                      type: string
+                filterAndSample:
+                  type: object
+                  properties:
+                    rules:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          pattern:
+                            type: string
+                          sampleRate:
+                            type: number
+                            minimum: 0
+                            maximum: 1
+                    deterministicSeedEnvVar:
+                      type: string
+                aggregation:
+                  type: object
+                  properties:
+                    statefulBackendEnabled:
+                      type: boolean
+                    windows:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          duration:
+                            type: string
+                            pattern: "^[0-9]+(m|s|h)$"
+                          operations:
+                            type: array
+                            items:
+                              type: string
+                              enum: ["sum", "count", "avg", "min", "max", "p50", "p90", "p95", "p99"]
+                gateway:
+                  type: object
+                  properties:
+                    pre:
+                      type: object
+                      properties:
+                        maxRetentionHours:
+                          type: integer
+                          minimum: 1
+                          maximum: 24
+                        watermarkPercentage:
+                          type: integer
+                          minimum: 50
+                          maximum: 95
+                    schemaEnforce:
+                      type: boolean
+                    exportEndpoint:
+                      type: string
+                deadLetterQueue:
+                  type: object
+                  properties:
+                    storagePath:
+                      type: string
+                    maxSizeGB:
+                      type: integer
+                      minimum: 1
+                    backend:
+                      type: string
+                      enum: ["leveldb", "kafka"]
+                circuitBreakers:
+                  type: object
+                  properties:
+                    defaults:
+                      type: object
+                      properties:
+                        errorThresholdPercentage:
+                          type: integer
+                          minimum: 1
+                          maximum: 100
+                        openStateSeconds:
+                          type: integer
+                          minimum: 1
+                        halfOpenRequestThreshold:
+                          type: integer
+                          minimum: 1
+                    overrides:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          fbName:
+                            type: string
+                          errorThresholdPercentage:
+                            type: integer
+                            minimum: 1
+                            maximum: 100
+                          openStateSeconds:
+                            type: integer
+                            minimum: 1
+                          halfOpenRequestThreshold:
+                            type: integer
+                            minimum: 1
+                globalSettings:
+                  type: object
+                  properties:
+                    deterministicSeedVersion:
+                      type: integer
+              required: ["rx", "gateway"]
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                configGenerationApplied:
+                  type: integer
+                fbStatus:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      ready:
+                        type: boolean
+                      configApplied:
+                        type: boolean
+                      configGeneration:
+                        type: integer
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      message:
+                        type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+      additionalPrinterColumns:
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Config
+          type: integer
+          jsonPath: .status.configGenerationApplied
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}

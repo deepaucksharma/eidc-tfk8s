@@ -1,0 +1,278 @@
+version: '3.8'
+
+services:
+  # Config Controller
+  config-controller:
+    build:
+      context: .
+      dockerfile: cmd/configcontroller/Dockerfile
+    ports:
+      - "5000:5000"  # gRPC
+      - "2112:2112"  # Metrics
+    environment:
+      - NAMESPACE=nrdot-devlab
+      - LEASEDURATION=15s
+      - RENEWDEADLINE=10s
+      - RETRYPERIOD=2s
+    volumes:
+      - ./examples/config:/config
+    networks:
+      - nrdot
+
+  # FB-RX (Receiver)
+  fb-rx:
+    build:
+      context: .
+      dockerfile: pkg/fb/rx/Dockerfile
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+      - "9009:9009"  # Prometheus remote-write
+      - "2113:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - NEXT_FB=fb-en-host:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    networks:
+      - nrdot
+
+  # FB-EN-HOST (Host Enrichment)
+  fb-en-host:
+    build:
+      context: .
+      dockerfile: pkg/fb/en-host/Dockerfile
+    ports:
+      - "2114:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - NEXT_FB=fb-en-k8s:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    networks:
+      - nrdot
+
+  # FB-EN-K8S (Kubernetes Enrichment)
+  fb-en-k8s:
+    build:
+      context: .
+      dockerfile: pkg/fb/en-k8s/Dockerfile
+    ports:
+      - "2115:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - NEXT_FB=fb-cl:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    networks:
+      - nrdot
+
+  # FB-CL (Classification)
+  fb-cl:
+    build:
+      context: .
+      dockerfile: pkg/fb/cl/Dockerfile
+    ports:
+      - "2116:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - NEXT_FB=fb-dp:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    volumes:
+      - cl-data:/data
+    networks:
+      - nrdot
+
+  # FB-DP (Deduplication)
+  fb-dp:
+    build:
+      context: .
+      dockerfile: pkg/fb/dp/Dockerfile
+    ports:
+      - "2117:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - NEXT_FB=fb-fs:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    volumes:
+      - dp-data:/data
+    networks:
+      - nrdot
+
+  # FB-FS (Filter/Sample)
+  fb-fs:
+    build:
+      context: .
+      dockerfile: pkg/fb/fs/Dockerfile
+    ports:
+      - "2118:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - NEXT_FB=fb-agg:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    networks:
+      - nrdot
+
+  # FB-AGG (Aggregation)
+  fb-agg:
+    build:
+      context: .
+      dockerfile: pkg/fb/agg/Dockerfile
+    ports:
+      - "2119:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - NEXT_FB=fb-gw-pre:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    volumes:
+      - agg-data:/data
+    networks:
+      - nrdot
+
+  # FB-GW-PRE (Gateway Pre-processing)
+  fb-gw-pre:
+    build:
+      context: .
+      dockerfile: pkg/fb/gw-pre/Dockerfile
+    ports:
+      - "2120:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - NEXT_FB=fb-gw:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    volumes:
+      - gw-pre-data:/data
+    networks:
+      - nrdot
+
+  # FB-GW (Gateway)
+  fb-gw:
+    build:
+      context: .
+      dockerfile: pkg/fb/gw/Dockerfile
+    ports:
+      - "2121:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - DLQ_SERVICE=fb-dlq:5000
+      - OTLP_EXPORTER=otel-collector:4317
+      - EXPORT_ENDPOINT=https://metric-api.newrelic.com
+    depends_on:
+      - config-controller
+      - otel-collector
+    networks:
+      - nrdot
+
+  # FB-DLQ (Dead Letter Queue)
+  fb-dlq:
+    build:
+      context: .
+      dockerfile: pkg/fb/dlq/Dockerfile
+    ports:
+      - "2122:2112"  # Metrics
+    environment:
+      - CONFIG_SERVICE=config-controller:5000
+      - OTLP_EXPORTER=otel-collector:4317
+    depends_on:
+      - config-controller
+      - otel-collector
+    volumes:
+      - dlq-data:/data
+    networks:
+      - nrdot
+
+  # DLQ-Replay Tool
+  dlq-replay:
+    build:
+      context: .
+      dockerfile: cmd/dlq-replay/Dockerfile
+    depends_on:
+      - fb-dlq
+      - fb-rx
+    networks:
+      - nrdot
+
+  # Observability Stack
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --web.console.templates=/etc/prometheus/consoles
+      - --web.enable-lifecycle
+    networks:
+      - nrdot
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - nrdot
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.89.0
+    ports:
+      - "4319:4317"  # OTLP gRPC
+      - "4320:4318"  # OTLP HTTP
+    volumes:
+      - ./deploy/otel/config.yaml:/etc/otel/config.yaml
+    command: ["--config=/etc/otel/config.yaml"]
+    networks:
+      - nrdot
+
+networks:
+  nrdot:
+    driver: bridge
+
+volumes:
+  cl-data:
+  dp-data:
+  agg-data:
+  gw-pre-data:
+  dlq-data:
+  prometheus-data:
+  grafana-data:

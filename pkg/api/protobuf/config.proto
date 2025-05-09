@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package nrdot.api.v1;
+
+option go_package = "github.com/newrelic/nrdot-internal-devlab/pkg/api/protobuf;protobuf";
+
+// ConfigService manages configuration for Function Blocks
+service ConfigService {
+  // GetConfig retrieves the latest configuration for a Function Block
+  rpc GetConfig(ConfigRequest) returns (ConfigResponse) {}
+  
+  // StreamConfig streams configuration updates to a Function Block
+  rpc StreamConfig(ConfigRequest) returns (stream ConfigResponse) {}
+  
+  // AckConfig acknowledges that a configuration was successfully applied
+  rpc AckConfig(ConfigAckRequest) returns (ConfigAckResponse) {}
+}
+
+// ConfigRequest is used to request configuration for a specific FB
+message ConfigRequest {
+  // The name of the FB requesting configuration
+  string fb_name = 1;
+  
+  // The instance ID of the FB (typically the pod name)
+  string instance_id = 2;
+  
+  // The last known configuration generation
+  int64 last_known_generation = 3;
+}
+
+// ConfigResponse contains configuration data for an FB
+message ConfigResponse {
+  // The configuration generation number
+  int64 generation = 1;
+  
+  // FB-specific configuration
+  bytes config = 2;
+  
+  // Whether this config requires a restart to take effect
+  bool requires_restart = 3;
+  
+  // Timestamp when this config was generated
+  int64 timestamp = 4;
+}
+
+// ConfigAckRequest acknowledges receipt and application of a config
+message ConfigAckRequest {
+  // The FB name
+  string fb_name = 1;
+  
+  // The instance ID
+  string instance_id = 2;
+  
+  // The generation being acknowledged
+  int64 generation = 3;
+  
+  // Whether the config was successfully applied
+  bool success = 4;
+  
+  // Error message if not successful
+  string error_message = 5;
+}
+
+// ConfigAckResponse is the response to a config acknowledgment
+message ConfigAckResponse {
+  // Whether the acknowledgment was recorded
+  bool recorded = 1;
+}

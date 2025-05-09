@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package nrdot.api.v1;
+
+option go_package = "github.com/newrelic/nrdot-internal-devlab/pkg/api/protobuf;protobuf";
+
+// ChainPushService defines the interface for pushing metric batches through the FB chain
+service ChainPushService {
+  // PushMetrics pushes a batch of metrics to the next FB in the chain
+  rpc PushMetrics(MetricBatchRequest) returns (MetricBatchResponse) {}
+}
+
+// MetricBatchRequest contains a batch of metrics to be processed
+message MetricBatchRequest {
+  // Unique identifier for this batch
+  string batch_id = 1;
+  
+  // The serialized metric batch data
+  bytes data = 2;
+  
+  // Format of the data (e.g., "otlp", "prometheus")
+  string format = 3;
+  
+  // Whether this is a replay from DLQ
+  bool replay = 4;
+  
+  // Configuration generation applied to this batch
+  int64 config_generation = 5;
+  
+  // Metadata for processing
+  map<string, string> metadata = 6;
+  
+  // Internal labels for pipeline processing
+  map<string, string> internal_labels = 7;
+}
+
+// MetricBatchResponse contains the result of processing a metric batch
+message MetricBatchResponse {
+  // Status of the operation
+  Status status = 1;
+  
+  // Error message, if any
+  string error_message = 2;
+  
+  // Error code, if any
+  string error_code = 3;
+  
+  // Batch ID echo
+  string batch_id = 4;
+}
+
+// Status represents the result of a push operation
+enum Status {
+  STATUS_UNKNOWN = 0;
+  STATUS_SUCCESS = 1;
+  STATUS_ERROR = 2;
+  STATUS_THROTTLED = 3;
+}

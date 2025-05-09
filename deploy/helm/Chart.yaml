@@ -1,0 +1,9 @@
+apiVersion: v2
+name: nrdot-internal-devlab
+description: A Helm chart for NRDOT+ Internal Dev-Lab
+type: application
+version: 2.1.2
+appVersion: 2.1.2
+maintainers:
+  - name: DevOps Team
+    email: devops@example.com

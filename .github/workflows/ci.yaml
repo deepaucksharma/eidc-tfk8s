@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      
+      - name: Verify dependencies
+        run: go mod verify
+      
+      - name: Run go vet
+        run: go vet ./...
+      
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      
+      - name: Run staticcheck
+        run: staticcheck ./...
+      
+      - name: Run gofmt
+        run: test -z "$(gofmt -s -l .)"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      
+      - name: Run unit tests
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.out
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Build and export FB-RX
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./pkg/fb/rx/Dockerfile
+          load: true
+          tags: nrdot-internal-devlab/fb-rx:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Build and export ConfigController
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./cmd/configcontroller/Dockerfile
+          load: true
+          tags: nrdot-internal-devlab/config-controller:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      # Add more Function Blocks as needed
+
+  integration-test:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Set up k3d
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v5.5.1
+          k3d-args: --no-lb --no-rollback
+      
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.12.0'
+      
+      - name: Install CRDs
+        run: kubectl apply -f deploy/k8s/crds/
+      
+      - name: Deploy with Helm
+        run: |
+          helm install nrdot-devlab ./deploy/helm --values ./deploy/helm/values-lab.yaml
+          kubectl rollout status deployment/nrdot-devlab-fb-rx
+      
+      - name: Run Integration Tests
+        run: go test -v ./pkg/test/slo/...
+
+  slo-validation:
+    name: SLO Validation
+    runs-on: ubuntu-latest
+    needs: [integration-test]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up k3d
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v5.5.1
+          k3d-args: --no-lb --no-rollback
+      
+      - name: Install Prometheus
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm install prometheus prometheus-community/prometheus
+      
+      - name: Deploy TF-K8s Test Stack
+        run: |
+          kubectl apply -f deploy/test/tf-k8s/
+          kubectl rollout status deployment/loadgen
+      
+      - name: Run SLO Tests
+        run: |
+          kubectl apply -f deploy/test/slo-tests/
+          kubectl wait --for=condition=complete --timeout=300s job/slo-tests
+          kubectl logs job/slo-tests
+
+  pii-test:
+    name: PII Protection Test
+    runs-on: ubuntu-latest
+    needs: [integration-test]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up k3d
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v5.5.1
+          k3d-args: --no-lb --no-rollback
+      
+      - name: Deploy Test Stack
+        run: |
+          kubectl apply -f deploy/test/pii-tests/
+          kubectl rollout status deployment/pii-test-ingestion
+      
+      - name: Run PII Tests
+        run: |
+          kubectl apply -f deploy/test/pii-tests/job.yaml
+          kubectl wait --for=condition=complete --timeout=300s job/pii-scrub-test
+          kubectl logs job/pii-scrub-test
