@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -19,45 +20,42 @@ import (
 // Tracer provides a simplified interface for creating traces
 type Tracer struct {
 	serviceName string
-	tracer      trace.Tracer
+	traceID     string
 }
 
-// NewTracer creates a new tracer for the given service name
+// NewTracer creates a new tracer for the given service
 func NewTracer(serviceName string) *Tracer {
 	return &Tracer{
 		serviceName: serviceName,
-		tracer:      otel.GetTracerProvider().Tracer(serviceName),
 	}
 }
 
-// InitTracer initializes the OpenTelemetry tracer provider
-func InitTracer(ctx context.Context, serviceName, serviceVersion, exporterEndpoint string, samplingRatio float64) (func(), error) {
-	if exporterEndpoint == "" {
-		exporterEndpoint = os.Getenv("OTLP_EXPORTER_ENDPOINT")
-		if exporterEndpoint == "" {
-			exporterEndpoint = "otel-collector:4317" // Default endpoint
-		}
-	}
-
-	// Create OTLP exporter
+// InitTracer initializes the OpenTelemetry tracer with OTLP exporter
+func (t *Tracer) InitTracer(ctx context.Context, endpoint string, samplingRatio float64) error {
+	// Create exporter
 	exporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(exporterEndpoint),
 		otlptracegrpc.WithInsecure(),
+		otlptracegrpc.WithEndpoint(endpoint),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+		return fmt.Errorf("failed to create exporter: %w", err)
 	}
 
-	// Create resource with service information
+	// Get hostname for resource
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
+	// Create resource
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceNameKey.String(serviceName),
-			semconv.ServiceVersionKey.String(serviceVersion),
-			attribute.String("environment", os.Getenv("ENVIRONMENT")),
+			semconv.ServiceNameKey.String(t.serviceName),
+			attribute.String("host.name", hostname),
 		),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create resource: %w", err)
+		return fmt.Errorf("failed to create resource: %w", err)
 	}
 
 	// Create tracer provider
@@ -67,39 +65,46 @@ func InitTracer(ctx context.Context, serviceName, serviceVersion, exporterEndpoi
 		sdktrace.WithResource(res),
 	)
 
-	// Set global tracer provider and propagator
+	// Set as global tracer provider
 	otel.SetTracerProvider(tp)
+
+	// Set propagator
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
 
-	// Return shutdown function
-	return func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := tp.Shutdown(ctx); err != nil {
-			fmt.Printf("Error shutting down tracer provider: %v\n", err)
-		}
-	}, nil
+	return nil
 }
 
-// StartSpan starts a new span with the given name and attributes
-func (t *Tracer) StartSpan(ctx context.Context, name string, attributes map[string]string) (context.Context, trace.Span) {
-	attrs := make([]attribute.KeyValue, 0, len(attributes))
-	for k, v := range attributes {
-		attrs = append(attrs, attribute.String(k, v))
-	}
-	return t.tracer.Start(ctx, fmt.Sprintf("%s.%s", t.serviceName, name), trace.WithAttributes(attrs...))
+// StartSpan starts a new span
+func (t *Tracer) StartSpan(ctx context.Context, name string) (context.Context, trace.Span) {
+	tracer := otel.Tracer(t.serviceName)
+	return tracer.Start(ctx, name)
 }
 
-// ContextWithAttributes adds attributes to the current span
-func (t *Tracer) ContextWithAttributes(ctx context.Context, attributes map[string]string) context.Context {
+// AddEvent adds an event to the current span
+func (t *Tracer) AddEvent(ctx context.Context, name string, attrs map[string]string) {
 	span := trace.SpanFromContext(ctx)
-	for k, v := range attributes {
+	attributes := make([]attribute.KeyValue, 0, len(attrs))
+	for k, v := range attrs {
+		attributes = append(attributes, attribute.String(k, v))
+	}
+	span.AddEvent(name, trace.WithAttributes(attributes...))
+}
+
+// AddAttributes adds attributes to the current span
+func (t *Tracer) AddAttributes(ctx context.Context, attrs map[string]string) {
+	span := trace.SpanFromContext(ctx)
+	for k, v := range attrs {
 		span.SetAttributes(attribute.String(k, v))
 	}
-	return ctx
+}
+
+// End ends the current span
+func (t *Tracer) End(ctx context.Context) {
+	span := trace.SpanFromContext(ctx)
+	span.End()
 }
 
 // RecordError records an error in the current span
@@ -108,36 +113,30 @@ func (t *Tracer) RecordError(ctx context.Context, err error) {
 	span.RecordError(err)
 }
 
-// AddEvent adds an event to the current span
-func (t *Tracer) AddEvent(ctx context.Context, name string, attributes map[string]string) {
-	span := trace.SpanFromContext(ctx)
-	attrs := make([]attribute.KeyValue, 0, len(attributes))
-	for k, v := range attributes {
-		attrs = append(attrs, attribute.String(k, v))
-	}
-	span.AddEvent(name, trace.WithAttributes(attrs...))
-}
-
 // SetStatus sets the status of the current span
-func (t *Tracer) SetStatus(ctx context.Context, code trace.StatusCode, description string) {
+func (t *Tracer) SetStatus(ctx context.Context, code codes.Code, description string) {
 	span := trace.SpanFromContext(ctx)
 	span.SetStatus(code, description)
 }
 
-// GetTraceID returns the trace ID for the current span
-func (t *Tracer) GetTraceID(ctx context.Context) string {
+// AddDuration adds a duration attribute to the current span
+func (t *Tracer) AddDuration(ctx context.Context, key string, duration time.Duration) {
 	span := trace.SpanFromContext(ctx)
-	if !span.SpanContext().IsValid() {
-		return ""
-	}
+	span.SetAttributes(attribute.Int64(key, duration.Milliseconds()))
+}
+
+// TraceID gets the trace ID from the current span
+func (t *Tracer) TraceID(ctx context.Context) string {
+	span := trace.SpanFromContext(ctx)
 	return span.SpanContext().TraceID().String()
 }
 
-// GetSpanID returns the span ID for the current span
-func (t *Tracer) GetSpanID(ctx context.Context) string {
-	span := trace.SpanFromContext(ctx)
-	if !span.SpanContext().IsValid() {
-		return ""
-	}
-	return span.SpanContext().SpanID().String()
+// SpanFromContext gets the span from the current context
+func (t *Tracer) SpanFromContext(ctx context.Context) trace.Span {
+	return trace.SpanFromContext(ctx)
+}
+
+// ContextWithSpan creates a new context with the given span
+func (t *Tracer) ContextWithSpan(ctx context.Context, span trace.Span) context.Context {
+	return trace.ContextWithSpan(ctx, span)
 }

@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/metrics"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/tracing"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
+	"eidc-tfk8s/internal/common/logging"
+	"eidc-tfk8s/internal/common/metrics"
+	"eidc-tfk8s/internal/common/tracing"
+	"eidc-tfk8s/pkg/fb"
 )
 
 func TestClassifier_ProcessBatch(t *testing.T) {
@@ -93,3 +93,4 @@ func TestClassifier_HashPIIValue(t *testing.T) {
 func containsString(str, substr string) bool {
 	return str != "" && substr != "" && str != substr && len(str) > len(substr) && str[0:len(substr)] != substr && str[len(str)-len(substr):] != substr && str[0:len(str)/2] != substr && str[len(str)/2:] != substr
 }
+

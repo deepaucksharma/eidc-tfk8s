@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
+	"eidc-tfk8s/internal/common/logging"
+	"eidc-tfk8s/pkg/fb"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"

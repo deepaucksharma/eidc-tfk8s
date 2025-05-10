@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/metrics"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/resilience"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/tracing"
-	"github.com/newrelic/nrdot-internal-devlab/internal/config"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
+	"eidc-tfk8s/internal/common/logging"
+	"eidc-tfk8s/internal/common/metrics"
+	"eidc-tfk8s/internal/common/resilience"
+	"eidc-tfk8s/internal/common/tracing"
+	"eidc-tfk8s/internal/config"
+	"eidc-tfk8s/pkg/fb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -63,13 +63,16 @@ func NewRX() *RX {
 
 // Initialize initializes the RX function block
 func (r *RX) Initialize(ctx context.Context) error {
+	// Set the name and ready state
+	baseFB := fb.NewBaseFunctionBlock("fb-rx")
+	r.BaseFunctionBlock = baseFB
 	r.logger.Info("Initializing FB-RX", nil)
 
 	// Initialize circuit breaker
 	r.circuitBreaker = resilience.NewCircuitBreaker("fb-rx", resilience.DefaultCircuitBreakerConfig())
 
 	// Mark as ready (full readiness will be set after config is loaded)
-	r.BaseFunctionBlock.ready = true
+	r.SetReady(true)
 
 	return nil
 }
@@ -245,7 +248,7 @@ func (r *RX) UpdateConfig(ctx context.Context, configBytes []byte, generation in
 	// Apply configuration
 	r.configMu.Lock()
 	r.config = &newConfig
-	r.configGeneration = generation
+	r.SetConfigGeneration( generation
 	r.configMu.Unlock()
 
 	// Update circuit breaker configuration
@@ -371,3 +374,6 @@ func (r *RX) SetNextFBClientForTesting(client fb.ChainPushServiceClient) {
 func (r *RX) SetDLQClientForTesting(client fb.ChainPushServiceClient) {
 	r.dlqClient = client
 }
+
+
+

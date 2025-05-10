@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/metrics"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/tracing"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb/cl"
+	"eidc-tfk8s/internal/common/logging"
+	"eidc-tfk8s/internal/common/metrics"
+	"eidc-tfk8s/internal/common/tracing"
+	"eidc-tfk8s/pkg/fb/cl"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -138,3 +138,4 @@ func main() {
 
 	logger.Info("Shutdown complete", nil)
 }
+

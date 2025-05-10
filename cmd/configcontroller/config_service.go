@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	pb "github.com/newrelic/nrdot-internal-devlab/pkg/api/protobuf"
+	pb "eidc-tfk8s/pkg/api/protobuf"
 )
 
 // ConfigController implements the ConfigService gRPC service
@@ -241,3 +241,4 @@ func (c *ConfigController) UpdateCRDStatus(crdName string) error {
 	
 	return fmt.Errorf("not implemented yet")
 }
+

@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/metrics"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/resilience"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/tracing"
-	"github.com/newrelic/nrdot-internal-devlab/internal/config"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
+	"eidc-tfk8s/internal/common/logging"
+	"eidc-tfk8s/internal/common/metrics"
+	"eidc-tfk8s/internal/common/resilience"
+	"eidc-tfk8s/internal/common/tracing"
+	"eidc-tfk8s/internal/config"
+	"eidc-tfk8s/pkg/fb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -70,6 +70,9 @@ func NewClassifier(logger *logging.Logger, metrics *metrics.FBMetrics, tracer *t
 
 // Initialize initializes the CL function block
 func (c *Classifier) Initialize(ctx context.Context) error {
+	// Set the name and ready state
+	baseFB := fb.NewBaseFunctionBlock("fb-cl")
+	c.BaseFunctionBlock = baseFB
 	c.logger.Info("Initializing FB-CL", nil)
 
 	// Initialize circuit breaker
@@ -86,7 +89,7 @@ func (c *Classifier) Initialize(ctx context.Context) error {
 	}
 
 	// Mark as ready (full readiness will be set after config is loaded)
-	c.BaseFunctionBlock.ready = true
+	c.SetReady(true)
 
 	return nil
 }
@@ -339,7 +342,7 @@ func (c *Classifier) UpdateConfig(ctx context.Context, configBytes []byte, gener
 	// Apply configuration
 	c.configMu.Lock()
 	c.config = &newConfig
-	c.configGeneration = generation
+	c.SetConfigGeneration( generation
 	c.configMu.Unlock()
 
 	// Update circuit breaker configuration
@@ -436,7 +439,7 @@ func (c *Classifier) ConnectServices(ctx context.Context, configServiceAddr, nex
 		SaltSecretKey:  c.saltSecretKey,
 		HashAlgorithm:  "sha256",
 	}
-	c.configGeneration = 1
+	c.SetConfigGeneration( 1
 	
 	// Connect to next FB
 	if err := c.connectToNextFB(ctx, nextFB); err != nil {
@@ -564,3 +567,7 @@ func (c *Classifier) NewChainPushServiceHandler() fb.ChainPushServiceServer {
 func (c *Classifier) RegisterChainPushServiceServer(server *grpc.Server, handler fb.ChainPushServiceServer) {
 	fb.RegisterChainPushServiceServer(server, handler)
 }
+
+
+
+

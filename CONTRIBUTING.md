@@ -54,7 +54,6 @@ docker build -t nrdot-internal-devlab/fb-rx:latest -f pkg/fb/rx/Dockerfile .
 ```
 
 ### Running Tests
-
 Run unit tests:
 
 ```bash
@@ -67,6 +66,39 @@ Run integration tests (requires a Kubernetes cluster):
 ./scripts/run-integration-tests.sh
 ```
 
+### Updating Test Matrix and Documentation
+
+When implementing or modifying a requirement, you must update the test matrix in `docs/appendices/appendix-a-test-matrix.md` and link your test to the appropriate row.
+
+#### How to Update the Test Matrix
+
+1. Open `docs/appendices/appendix-a-test-matrix.md`
+2. Find the row corresponding to the requirement you're implementing or modifying
+3. Update the Status and Test(s) columns
+4. If you're adding a new test, link it in the Test(s) column
+
+Example row:
+```
+| FR-DP-04 | P0 | PII Hashing & Sanitization | Passing | [deploy/test/tf-k8s/schema_pii_enforcement/FR-DP-04_pii_hashing_all_fields.yaml](../../../deploy/test/tf-k8s/schema_pii_enforcement/FR-DP-04_pii_hashing_all_fields.yaml) |
+```
+
+#### Writing TF-K8s Scenarios
+
+TF-K8s scenarios are stored in the `deploy/test/tf-k8s/` directory, organized by suite. When writing a new scenario:
+
+1. Create a new YAML file in the appropriate suite directory
+2. Name the file according to the convention: `<id>_<short-desc>.yaml` (e.g., `FR-DP-04_pii_hashing_all_fields.yaml`)
+3. Include validation steps to verify the requirement is met
+
+#### Running the Test Matrix Builder
+
+After updating the test matrix, you can run the test matrix builder to update the PRD:
+
+```bash
+python tools/test-matrix-builder/test_matrix_builder.py
+```
+
+This will update the PRD with the latest test matrix. The CI pipeline will also run this automatically.
 ### Local Deployment
 
 Deploy the entire stack using Docker Compose:

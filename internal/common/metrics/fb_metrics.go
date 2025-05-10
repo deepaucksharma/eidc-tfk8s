@@ -17,6 +17,7 @@ type FBMetrics struct {
 	BatchesRejectedTotal   prometheus.Counter
 	BatchesDLQTotal        prometheus.Counter
 	ProcessingErrorsTotal  prometheus.Counter
+	ValidationErrorsTotal  prometheus.Counter  // Added for validation errors
 
 	// Gauges
 	ActiveConnections      prometheus.Gauge
@@ -73,6 +74,12 @@ func NewFBMetrics(fbName string) *FBMetrics {
 	m.ProcessingErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "fb_processing_errors_total",
 		Help: "Total number of errors that occurred during processing",
+		ConstLabels: labels,
+	})
+
+	m.ValidationErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fb_validation_errors_total",
+		Help: "Total number of validation errors",
 		ConstLabels: labels,
 	})
 
@@ -143,6 +150,11 @@ func (m *FBMetrics) RecordBatchDLQ() {
 // RecordProcessingError records that an error occurred during processing
 func (m *FBMetrics) RecordProcessingError() {
 	m.ProcessingErrorsTotal.Inc()
+}
+
+// RecordBatchValidationError records that a validation error occurred
+func (m *FBMetrics) RecordBatchValidationError() {
+	m.ValidationErrorsTotal.Inc()
 }
 
 // SetActiveConnections sets the number of active connections

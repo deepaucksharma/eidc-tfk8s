@@ -135,14 +135,32 @@ type BaseFunctionBlock struct {
 	configGeneration  int64
 }
 
+// NewBaseFunctionBlock creates a new BaseFunctionBlock with the given name
+func NewBaseFunctionBlock(name string) BaseFunctionBlock {
+	return BaseFunctionBlock{
+		name:  name,
+		ready: false,
+	}
+}
+
 // Name returns the name of the function block
 func (b *BaseFunctionBlock) Name() string {
 	return b.name
 }
 
+// SetReady sets the ready state of the function block
+func (b *BaseFunctionBlock) SetReady(ready bool) {
+	b.ready = ready
+}
+
 // Ready returns whether the function block is ready to process data
 func (b *BaseFunctionBlock) Ready() bool {
 	return b.ready
+}
+
+// SetConfigGeneration sets the configuration generation
+func (b *BaseFunctionBlock) SetConfigGeneration(generation int64) {
+	b.configGeneration = generation
 }
 
 // GetConfigGeneration returns the current configuration generation

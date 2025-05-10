@@ -20,7 +20,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
-	pb "github.com/newrelic/nrdot-internal-devlab/pkg/api/protobuf"
+	pb "eidc-tfk8s/pkg/api/protobuf"
 )
 
 // Build information, injected at build time

@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/metrics"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/resilience"
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/tracing"
-	"github.com/newrelic/nrdot-internal-devlab/internal/config"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
+	"eidc-tfk8s/internal/common/logging"
+	"eidc-tfk8s/internal/common/metrics"
+	"eidc-tfk8s/internal/common/resilience"
+	"eidc-tfk8s/internal/common/tracing"
+	"eidc-tfk8s/internal/config"
+	"eidc-tfk8s/pkg/fb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

@@ -1,0 +1,261 @@
+---
+# Test case for FR-AGG-01: Metric Aggregation
+apiVersion: tfk8s.nrdot.newrelic.com/v1
+kind: TestScenario
+metadata:
+  name: fr-agg-01-metric-aggregation
+  labels:
+    requirement: FR-AGG-01
+    suite: aggregation
+spec:
+  description: |
+    This test verifies that the FB-AGG function block correctly aggregates
+    metrics according to specified aggregation rules and time windows.
+  
+  setup:
+    - apply:
+        kind: NRDOTPlusPipeline
+        name: test-aggregation-pipeline
+        spec:
+          functionBlocks:
+            - name: receiver
+              type: fb-rx
+              config:
+                specific:
+                  ports:
+                    otlpGrpc: 4317
+                    otlpHttp: 4318
+              connections:
+                - target: aggregator
+            
+            - name: aggregator
+              type: fb-agg
+              config:
+                specific:
+                  windowSeconds: 60
+                  aggregations:
+                    - metric: "http_requests_total"
+                      type: "sum"
+                      labels: ["http.method", "http.status_code"]
+                    - metric: "http_request_duration_seconds"
+                      type: "avg"
+                      labels: ["http.method", "http.path"]
+                    - metric: "system_memory_usage"
+                      type: "max"
+                      labels: ["host.name"]
+                    - metric: "cpu_utilization"
+                      type: "min"
+                      labels: ["host.name", "cpu.core"]
+                    - metric: "http_response_size_bytes"
+                      type: "histogram"
+                      labels: ["http.path"]
+                      buckets: [100, 1000, 10000, 100000]
+              connections:
+                - target: gateway
+            
+            - name: gateway
+              type: fb-gw
+              config:
+                specific:
+                  schemaValidation: true
+                  exportEndpoints:
+                    - name: "prometheus"
+                      type: "prometheus"
+                      url: "http://test-prometheus:9090/api/v1/write"
+    
+    - deploy:
+        name: metrics-generator
+        image: nrdot-internal-devlab/metrics-generator:latest
+        env:
+          - name: TARGET_OTLP_ENDPOINT
+            value: http://receiver:4318
+          - name: GENERATION_INTERVAL_MS
+            value: "500"
+          - name: SERIES_COUNT
+            value: "10"
+
+  testCases:
+    - name: "Sum Aggregation"
+      description: "Verify sum aggregation of http_requests_total metric"
+      steps:
+        - generateMetrics:
+            name: metrics-generator
+            metrics:
+              - name: "http_requests_total"
+                type: "counter"
+                attributes:
+                  http.method: "GET"
+                  http.status_code: "200"
+                values: [1, 2, 3, 4, 5]
+        - wait: 65s # Wait for the aggregation window
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_requests_total{http.method="GET",http.status_code="200"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 15 # Sum of 1+2+3+4+5
+    
+    - name: "Average Aggregation"
+      description: "Verify average aggregation of http_request_duration_seconds metric"
+      steps:
+        - generateMetrics:
+            name: metrics-generator
+            metrics:
+              - name: "http_request_duration_seconds"
+                type: "gauge"
+                attributes:
+                  http.method: "POST"
+                  http.path: "/api/v1/data"
+                values: [0.1, 0.2, 0.3, 0.4, 0.5]
+        - wait: 65s # Wait for the aggregation window
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_request_duration_seconds{http.method="POST",http.path="/api/v1/data"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 0.3 # Average of 0.1+0.2+0.3+0.4+0.5 = 1.5/5 = 0.3
+    
+    - name: "Maximum Aggregation"
+      description: "Verify maximum aggregation of system_memory_usage metric"
+      steps:
+        - generateMetrics:
+            name: metrics-generator
+            metrics:
+              - name: "system_memory_usage"
+                type: "gauge"
+                attributes:
+                  host.name: "test-host-1"
+                values: [1024, 2048, 4096, 1536, 3072]
+        - wait: 65s # Wait for the aggregation window
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'system_memory_usage{host.name="test-host-1"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 4096 # Maximum value
+
+    - name: "Minimum Aggregation"
+      description: "Verify minimum aggregation of cpu_utilization metric"
+      steps:
+        - generateMetrics:
+            name: metrics-generator
+            metrics:
+              - name: "cpu_utilization"
+                type: "gauge"
+                attributes:
+                  host.name: "test-host-2"
+                  cpu.core: "0"
+                values: [45.2, 32.1, 67.8, 29.5, 51.3]
+        - wait: 65s # Wait for the aggregation window
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'cpu_utilization{host.name="test-host-2",cpu.core="0"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 29.5 # Minimum value
+
+    - name: "Histogram Aggregation"
+      description: "Verify histogram aggregation of http_response_size_bytes metric"
+      steps:
+        - generateMetrics:
+            name: metrics-generator
+            metrics:
+              - name: "http_response_size_bytes"
+                type: "histogram"
+                attributes:
+                  http.path: "/api/v1/download"
+                values: [50, 500, 5000, 50000, 150000]
+        - wait: 65s # Wait for the aggregation window
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_response_size_bytes_bucket{http.path="/api/v1/download",le="100"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 1 # 1 value below 100
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_response_size_bytes_bucket{http.path="/api/v1/download",le="1000"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 2 # 2 values below 1000
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_response_size_bytes_bucket{http.path="/api/v1/download",le="10000"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 3 # 3 values below 10000
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_response_size_bytes_bucket{http.path="/api/v1/download",le="100000"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 4 # 4 values below 100000
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_response_size_bytes_bucket{http.path="/api/v1/download",le="+Inf"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 5 # All 5 values
+    
+    - name: "Multiple Series Aggregation"
+      description: "Verify aggregation works correctly with multiple series"
+      steps:
+        - generateMetrics:
+            name: metrics-generator
+            metrics:
+              - name: "http_requests_total"
+                type: "counter"
+                attributes:
+                  http.method: "GET"
+                  http.status_code: "200"
+                values: [1, 2, 3]
+              - name: "http_requests_total"
+                type: "counter"
+                attributes:
+                  http.method: "GET"
+                  http.status_code: "404"
+                values: [4, 5, 6]
+              - name: "http_requests_total"
+                type: "counter"
+                attributes:
+                  http.method: "POST"
+                  http.status_code: "200"
+                values: [7, 8, 9]
+        - wait: 65s # Wait for the aggregation window
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_requests_total{http.method="GET",http.status_code="200"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 6 # Sum of 1+2+3
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_requests_total{http.method="GET",http.status_code="404"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 15 # Sum of 4+5+6
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'http_requests_total{http.method="POST",http.status_code="200"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 24 # Sum of 7+8+9
+
+  cleanup:
+    - delete:
+        kind: NRDOTPlusPipeline
+        name: test-aggregation-pipeline
+    - delete:
+        name: metrics-generator

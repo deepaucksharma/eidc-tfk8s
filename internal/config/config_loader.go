@@ -7,90 +7,93 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
-// ConfigClient manages the connection to the config controller and streams config updates
+// ConfigClient is a client for the Config service
 type ConfigClient struct {
+	client          ConfigServiceClient
+	conn            *grpc.ClientConn
 	fbName          string
 	instanceID      string
+	config          []byte
 	configGeneration int64
 	configMu        sync.RWMutex
-	config          []byte
-	conn            *grpc.ClientConn
-	client          ConfigServiceClient
-	logger          *logging.Logger
 	callbacks       []func([]byte, int64) error
+	logger          Logger
 }
 
-// NewConfigClient creates a new config client for the specified function block
-func NewConfigClient(fbName, instanceID string, logger *logging.Logger) *ConfigClient {
-	return &ConfigClient{
-		fbName:          fbName,
-		instanceID:      instanceID,
-		configGeneration: 0,
-		logger:          logger,
-		callbacks:       make([]func([]byte, int64) error, 0),
-	}
+// Logger interface for logging
+type Logger interface {
+	Info(msg string, keyValues map[string]interface{})
+	Error(msg string, err error, keyValues map[string]interface{})
+	Warn(msg string, keyValues map[string]interface{})
+	Debug(msg string, keyValues map[string]interface{})
 }
 
-// Connect establishes a connection to the config controller
-func (c *ConfigClient) Connect(ctx context.Context, configServiceAddr string) error {
-	// Create gRPC connection
-	conn, err := grpc.DialContext(ctx, configServiceAddr, 
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-		grpc.WithTimeout(5*time.Second),
-	)
+// NewConfigClient creates a new Config client
+func NewConfigClient(fbName, instanceID, configServiceAddr string, logger Logger) (*ConfigClient, error) {
+	// Connect to the config service
+	conn, err := grpc.Dial(configServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("failed to connect to config service: %w", err)
-	}
-	
-	c.conn = conn
-	c.client = NewConfigServiceClient(conn)
-	return nil
-}
-
-// GetCurrentConfig returns the current configuration
-func (c *ConfigClient) GetCurrentConfig() []byte {
-	c.configMu.RLock()
-	defer c.configMu.RUnlock()
-	return c.config
-}
-
-// GetCurrentGeneration returns the current configuration generation
-func (c *ConfigClient) GetCurrentGeneration() int64 {
-	c.configMu.RLock()
-	defer c.configMu.RUnlock()
-	return c.configGeneration
-}
-
-// RegisterCallback registers a callback function to be called when config is updated
-func (c *ConfigClient) RegisterCallback(callback func([]byte, int64) error) {
-	c.callbacks = append(c.callbacks, callback)
-}
-
-// StartConfigWatcher starts watching for configuration updates
-func (c *ConfigClient) StartConfigWatcher(ctx context.Context) error {
-	if c.client == nil {
-		return fmt.Errorf("not connected to config service")
+		return nil, fmt.Errorf("failed to connect to config service: %w", err)
 	}
 
-	// First fetch initial config
-	initialConfig, err := c.getConfig(ctx)
+	// Create the client
+	client := ConfigServiceClient(NewConfigServiceClient(conn))
+
+	return &ConfigClient{
+		client:     client,
+		conn:       conn,
+		fbName:     fbName,
+		instanceID: instanceID,
+		logger:     logger,
+		callbacks:  make([]func([]byte, int64) error, 0),
+	}, nil
+}
+
+// Start starts the config client
+func (c *ConfigClient) Start(ctx context.Context) error {
+	// Get initial config
+	res, err := c.getConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get initial config: %w", err)
 	}
 
 	// Update local config
-	c.updateConfig(initialConfig.Config, initialConfig.Generation)
+	c.updateConfig(res.Config, res.Generation)
 
 	// Start watching for config updates
 	go c.watchConfig(ctx)
 
 	return nil
+}
+
+// RegisterCallback registers a callback to be called when the config is updated
+func (c *ConfigClient) RegisterCallback(callback func([]byte, int64) error) {
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
+
+	c.callbacks = append(c.callbacks, callback)
+}
+
+// GetConfig returns the current config
+func (c *ConfigClient) GetConfig() []byte {
+	c.configMu.RLock()
+	defer c.configMu.RUnlock()
+
+	return c.config
+}
+
+// GetCurrentGeneration returns the current config generation
+func (c *ConfigClient) GetCurrentGeneration() int64 {
+	c.configMu.RLock()
+	defer c.configMu.RUnlock()
+
+	return c.configGeneration
 }
 
 // getConfig gets the latest configuration from the config service
@@ -223,6 +226,9 @@ type FBConfig struct {
 	// Next FB in the chain
 	NextFB string `json:"next_fb"`
 
+	// DLQ endpoint
+	DLQ string `json:"dlq"`
+
 	// Circuit breaker configuration
 	CircuitBreaker CircuitBreakerConfig `json:"circuit_breaker"`
 }
@@ -232,47 +238,4 @@ type CircuitBreakerConfig struct {
 	ErrorThresholdPercentage int `json:"error_threshold_percentage"`
 	OpenStateSeconds         int `json:"open_state_seconds"`
 	HalfOpenRequestThreshold int `json:"half_open_request_threshold"`
-}
-
-// Mock gRPC client types for compilation (would be generated from protobuf)
-type ConfigServiceClient interface {
-	GetConfig(ctx context.Context, in *ConfigRequest, opts ...grpc.CallOption) (*ConfigResponse, error)
-	StreamConfig(ctx context.Context, in *ConfigRequest, opts ...grpc.CallOption) (ConfigService_StreamConfigClient, error)
-	AckConfig(ctx context.Context, in *ConfigAckRequest, opts ...grpc.CallOption) (*ConfigAckResponse, error)
-}
-
-type ConfigService_StreamConfigClient interface {
-	Recv() (*ConfigResponse, error)
-	grpc.ClientStream
-}
-
-type ConfigRequest struct {
-	FbName             string `json:"fb_name"`
-	InstanceId         string `json:"instance_id"`
-	LastKnownGeneration int64  `json:"last_known_generation"`
-}
-
-type ConfigResponse struct {
-	Generation      int64  `json:"generation"`
-	Config          []byte `json:"config"`
-	RequiresRestart bool   `json:"requires_restart"`
-	Timestamp       int64  `json:"timestamp"`
-}
-
-type ConfigAckRequest struct {
-	FbName     string `json:"fb_name"`
-	InstanceId string `json:"instance_id"`
-	Generation int64  `json:"generation"`
-	Success    bool   `json:"success"`
-	ErrorMessage string `json:"error_message,omitempty"`
-}
-
-type ConfigAckResponse struct {
-	Recorded bool `json:"recorded"`
-}
-
-// NewConfigServiceClient creates a new client for the ConfigService
-func NewConfigServiceClient(cc *grpc.ClientConn) ConfigServiceClient {
-	// This is a mock implementation that would be generated from protobuf
-	return nil
 }

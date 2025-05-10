@@ -70,12 +70,7 @@ func (c *chainPushServiceClient) PushMetrics(ctx context.Context, in *MetricBatc
 	}
 	return out, nil
 }
-
-// ChainPushServiceServer is the server API for ChainPushService service.
-type ChainPushServiceServer interface {
-	// PushMetrics pushes a batch of metrics to the next FB in the chain
-	PushMetrics(context.Context, *MetricBatchRequest) (*MetricBatchResponse, error)
-}
+// The ChainPushServiceServer interface is defined in grpc_service.go
 
 // MockChainPushServiceClient is a mock implementation of ChainPushServiceClient for testing
 type MockChainPushServiceClient struct {

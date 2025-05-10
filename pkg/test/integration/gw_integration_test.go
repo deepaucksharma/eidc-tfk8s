@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/schema"
-	"github.com/newrelic/nrdot-internal-devlab/internal/config"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb/gw"
+	"eidc-tfk8s/internal/common/schema"
+	"eidc-tfk8s/internal/config"
+	"eidc-tfk8s/pkg/fb"
+	"eidc-tfk8s/pkg/fb/gw"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -272,3 +272,4 @@ func TestGatewayIntegration_PiiDetection(t *testing.T) {
 	assert.Equal(t, batchWithPii.BatchID, dlqServer.receivedBatches[0].BatchId)
 	assert.Contains(t, dlqServer.receivedBatches[0].InternalLabels["error"], "PII")
 }
+

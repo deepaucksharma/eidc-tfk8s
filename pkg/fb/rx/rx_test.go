@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/resilience"
-	"github.com/newrelic/nrdot-internal-devlab/internal/config"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
+	"eidc-tfk8s/internal/common/resilience"
+	"eidc-tfk8s/internal/config"
+	"eidc-tfk8s/pkg/fb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -294,3 +294,5 @@ func TestRX_Shutdown(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, r.Ready())
 }
+
+

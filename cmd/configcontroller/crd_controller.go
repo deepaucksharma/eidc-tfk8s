@@ -17,7 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
-	pb "github.com/newrelic/nrdot-internal-devlab/pkg/api/protobuf"
+	pb "eidc-tfk8s/pkg/api/protobuf"
 )
 
 // CRDController manages the NRDotPlusPipeline CRD

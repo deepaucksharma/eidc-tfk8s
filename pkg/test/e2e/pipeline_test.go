@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/schema"
-	"github.com/newrelic/nrdot-internal-devlab/internal/config"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb/rx"
-	"github.com/newrelic/nrdot-internal-devlab/pkg/fb/gw"
+	"eidc-tfk8s/internal/common/schema"
+	"eidc-tfk8s/internal/config"
+	"eidc-tfk8s/pkg/fb"
+	"eidc-tfk8s/pkg/fb/rx"
+	"eidc-tfk8s/pkg/fb/gw"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -419,3 +419,4 @@ func TestPipeline_CircuitBreaker(t *testing.T) {
 		assert.True(t, expectedBatchIDs[batch.BatchId], fmt.Sprintf("Unexpected batch in DLQ: %s", batch.BatchId))
 	}
 }
+

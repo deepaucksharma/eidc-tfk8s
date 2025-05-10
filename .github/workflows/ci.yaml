@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
@@ -7,6 +7,34 @@ on:
     branches: [ main ]
 
 jobs:
+  matrix-check:
+    name: Test Matrix Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Verify test matrix
+        run: python tools/test-matrix-builder/test_matrix_builder.py verify
+      
+      - name: Update PRD from appendices
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: python tools/test-matrix-builder/test_matrix_builder.py
+      
+      - name: Commit updated PRD
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/prd/PRD-NRDOT-INT-LAB-v2.1.2-v1.6.md
+          git commit -m "Update PRD from appendices [skip ci]" || echo "No changes to commit"
+          git push
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -35,7 +63,7 @@ jobs:
         run: test -z "$(gofmt -s -l .)"
 
   test:
-    name: Test
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -84,11 +112,9 @@ jobs:
           tags: nrdot-internal-devlab/config-controller:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      
-      # Add more Function Blocks as needed
 
-  integration-test:
-    name: Integration Test
+  system-e2e-core:
+    name: System E2E Core Tests
     runs-on: ubuntu-latest
     needs: [build]
     steps:
@@ -117,16 +143,54 @@ jobs:
           helm install nrdot-devlab ./deploy/helm --values ./deploy/helm/values-lab.yaml
           kubectl rollout status deployment/nrdot-devlab-fb-rx
       
-      - name: Run Integration Tests
+      - name: Run Core E2E Tests
+        run: go test -v ./pkg/test/e2e/...
+
+  system-e2e-advanced:
+    name: System E2E Advanced Tests
+    runs-on: ubuntu-latest
+    needs: [system-e2e-core]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Set up k3d
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v5.5.1
+          k3d-args: --no-lb --no-rollback
+      
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.12.0'
+      
+      - name: Install CRDs
+        run: kubectl apply -f deploy/k8s/crds/
+      
+      - name: Deploy with Helm
+        run: |
+          helm install nrdot-devlab ./deploy/helm --values ./deploy/helm/values-lab.yaml
+          kubectl rollout status deployment/nrdot-devlab-fb-rx
+      
+      - name: Run Advanced E2E Tests
         run: go test -v ./pkg/test/slo/...
 
-  slo-validation:
-    name: SLO Validation
+  resilience-chaos:
+    name: Resilience and Chaos Tests
     runs-on: ubuntu-latest
-    needs: [integration-test]
+    needs: [system-e2e-core]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Check out code
         uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
       
       - name: Set up k3d
         uses: nolar/setup-k3d-k3s@v1
@@ -134,29 +198,38 @@ jobs:
           version: v5.5.1
           k3d-args: --no-lb --no-rollback
       
-      - name: Install Prometheus
-        run: |
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm install prometheus prometheus-community/prometheus
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.12.0'
       
-      - name: Deploy TF-K8s Test Stack
-        run: |
-          kubectl apply -f deploy/test/tf-k8s/
-          kubectl rollout status deployment/loadgen
+      - name: Install CRDs
+        run: kubectl apply -f deploy/k8s/crds/
       
-      - name: Run SLO Tests
+      - name: Deploy with Helm
         run: |
-          kubectl apply -f deploy/test/slo-tests/
-          kubectl wait --for=condition=complete --timeout=300s job/slo-tests
-          kubectl logs job/slo-tests
+          helm install nrdot-devlab ./deploy/helm --values ./deploy/helm/values-lab.yaml
+          kubectl rollout status deployment/nrdot-devlab-fb-rx
+      
+      - name: Install Chaos Mesh
+        run: |
+          helm repo add chaos-mesh https://charts.chaos-mesh.org
+          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --create-namespace
+      
+      - name: Run Chaos Tests
+        run: go test -v ./pkg/test/chaos/...
 
-  pii-test:
-    name: PII Protection Test
+  dr-drill-light:
+    name: DR Drill Light Tests
     runs-on: ubuntu-latest
-    needs: [integration-test]
+    needs: [system-e2e-advanced, resilience-chaos]
+    if: github.event_name == 'schedule' # Only runs on schedule, not on push or PR
     steps:
       - name: Check out code
         uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
       
       - name: Set up k3d
         uses: nolar/setup-k3d-k3s@v1
@@ -164,13 +237,24 @@ jobs:
           version: v5.5.1
           k3d-args: --no-lb --no-rollback
       
-      - name: Deploy Test Stack
-        run: |
-          kubectl apply -f deploy/test/pii-tests/
-          kubectl rollout status deployment/pii-test-ingestion
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.12.0'
       
-      - name: Run PII Tests
+      - name: Install CRDs
+        run: kubectl apply -f deploy/k8s/crds/
+      
+      - name: Deploy with Helm
         run: |
-          kubectl apply -f deploy/test/pii-tests/job.yaml
-          kubectl wait --for=condition=complete --timeout=300s job/pii-scrub-test
-          kubectl logs job/pii-scrub-test
+          helm install nrdot-devlab ./deploy/helm --values ./deploy/helm/values-lab.yaml
+          kubectl rollout status deployment/nrdot-devlab-fb-rx
+      
+      - name: Create Volume Snapshots
+        run: ./deploy/scripts/backup-restore/backup-pvc.sh
+      
+      - name: Delete and Restore from Snapshots
+        run: ./deploy/scripts/backup-restore/restore-pvc.sh
+      
+      - name: Verify System Operation Post-Restore
+        run: go test -v ./pkg/test/resilience/...

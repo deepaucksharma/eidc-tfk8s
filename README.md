@@ -13,9 +13,8 @@ NRDOT+ (New Relic Data Observability Telemetry Plus) Internal Dev-Lab v2.1.2 pro
 - **Dynamic Configuration:** Adjust pipeline behavior at runtime via CRD and gRPC
 - **Resilience by Design:** Circuit breakers, dead-letter queues, and durable buffering
 - **PII Protection:** Zero leakage of sensitive fields through audit metrics and schema enforcement
-- **Reproducible Validation:** Automated SLO tests and chaos experiments
+- **Reproducible Validation:** Automated System-E2E (core/advanced) tests and chaos experiments. See [Appendix I: End-to-End Test Program](./docs/appendices/appendix-i-e2e-program.md)
 - **Documentation & Operability:** Clear runbooks and operational guides
-
 ## Architecture
 
 NRDOT+ is built around a chain of Function Blocks (FBs), each providing a specific processing capability:
@@ -56,3 +55,5 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and guidelines.
 - Architecture diagrams and descriptions are in [docs/architecture](./docs/architecture)
 - Operational runbooks can be found in [docs/runbooks](./docs/runbooks)
 - API documentation is available in [docs/api](./docs/api)
+- Test status updates are available in [docs/appendices/test-status-updates.md](./docs/appendices/test-status-updates.md)
+- The Product Requirements Document (PRD) is available in [docs/prd](./docs/prd)

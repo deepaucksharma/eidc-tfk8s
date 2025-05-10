@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/newrelic/nrdot-internal-devlab/internal/common/logging"
+	"eidc-tfk8s/internal/common/logging"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -813,3 +813,4 @@ func main() {
 
 	logger.Info("Shutdown complete", nil)
 }
+
