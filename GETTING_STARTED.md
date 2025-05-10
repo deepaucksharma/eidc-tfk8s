@@ -108,3 +108,5 @@ The NRDOT+ pipeline consists of the following Function Blocks:
 - See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed development guidelines
 - See [docs/architecture](./docs/architecture) for architecture documentation
 - See [docs/runbooks](./docs/runbooks) for operational guides
+- Test Matrix: [docs/appendices/appendix-a-test-matrix.md](./docs/appendices/appendix-a-test-matrix.md)
+- E2E Test Program: [docs/appendices/appendix-i-e2e-program.md](./docs/appendices/appendix-i-e2e-program.md)

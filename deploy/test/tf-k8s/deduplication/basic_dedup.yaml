@@ -1,0 +1,140 @@
+---
+# Test case for FR-DP-01: Deduplication
+apiVersion: tfk8s.nrdot.newrelic.com/v1
+kind: TestScenario
+metadata:
+  name: fr-dp-01-basic-deduplication
+  labels:
+    requirement: FR-DP-01
+    suite: deduplication
+spec:
+  description: |
+    This test verifies that the FB-DP function block correctly deduplicates
+    telemetry data based on configurable deduplication keys.
+  
+  setup:
+    - apply:
+        kind: NRDOTPlusPipeline
+        name: test-basic-dedup-pipeline
+        spec:
+          functionBlocks:
+            - name: receiver
+              type: fb-rx
+              config:
+                specific:
+                  ports:
+                    otlpGrpc: 4317
+                    otlpHttp: 4318
+              connections:
+                - target: deduplicator
+            
+            - name: deduplicator
+              type: fb-dp
+              config:
+                specific:
+                  storageType: memory
+                  ttlMinutes: 60
+                  deduplicationKey: ["id", "timestamp"]
+              connections:
+                - target: gateway
+            
+            - name: gateway
+              type: fb-gw
+              config:
+                specific:
+                  schemaValidation: true
+                  exportEndpoints:
+                    - name: "prometheus"
+                      type: "prometheus"
+                      url: "http://test-prometheus:9090/api/v1/write"
+    
+    - deploy:
+        name: telemetry-generator
+        image: nrdot-internal-devlab/telemetry-generator:latest
+        env:
+          - name: TARGET_OTLP_ENDPOINT
+            value: http://receiver:4318
+          - name: GENERATION_INTERVAL_MS
+            value: "0"  # Single batch mode
+          - name: SERIES_COUNT
+            value: "1"
+
+  testCases:
+    - name: "Basic Deduplication"
+      description: "Verify basic deduplication functionality"
+      steps:
+        # Phase 1: Send initial batch and verify metrics
+        - generateTelemetry:
+            name: telemetry-generator
+            metrics:
+              - id: "test-metric-1"
+                name: "test_counter"
+                type: "counter"
+                timestamp: "2025-05-10T12:00:00Z"
+                value: 10
+                attributes:
+                  service.name: "test-service"
+                  environment: "dev"
+        
+        - wait: 5s
+        
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'test_counter{service_name="test-service",environment="dev"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 10
+        
+        # Phase 2: Send same batch again and verify no change (deduplication works)
+        - generateTelemetry:
+            name: telemetry-generator
+            metrics:
+              - id: "test-metric-1"
+                name: "test_counter"
+                type: "counter"
+                timestamp: "2025-05-10T12:00:00Z"
+                value: 10
+                attributes:
+                  service.name: "test-service"
+                  environment: "dev"
+        
+        - wait: 5s
+        
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'test_counter{service_name="test-service",environment="dev"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 10  # Value should not change (still 10)
+        
+        # Phase 3: Send a new metric and verify it passes through
+        - generateTelemetry:
+            name: telemetry-generator
+            metrics:
+              - id: "test-metric-2"
+                name: "test_counter"
+                type: "counter"
+                timestamp: "2025-05-10T12:30:00Z"
+                value: 5
+                attributes:
+                  service.name: "test-service"
+                  environment: "dev"
+        
+        - wait: 5s
+        
+        - verifyMetrics:
+            endpoint: "http://test-prometheus:9090/api/v1/query"
+            query: 'test_counter{service_name="test-service",environment="dev"}'
+            expectations:
+              - type: "value"
+                operator: "=="
+                value: 15  # 10 (original) + 5 (new) = 15
+
+  cleanup:
+    - delete:
+        kind: NRDOTPlusPipeline
+        name: test-basic-dedup-pipeline
+    - delete:
+        name: telemetry-generator

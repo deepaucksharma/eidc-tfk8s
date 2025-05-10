@@ -18,7 +18,7 @@ toc: false
 | FR-DP-04 | P0 | PII Hashing & Sanitization | Passing | [deploy/test/tf-k8s/schema_pii_enforcement/FR-DP-04_pii_hashing_all_fields.yaml](../../../deploy/test/tf-k8s/schema_pii_enforcement/FR-DP-04_pii_hashing_all_fields.yaml) |
 | FR-FS-01 | P1 | Configurable Filtering | Passing | [deploy/test/tf-k8s/filtering/pattern_matching.yaml](../../../deploy/test/tf-k8s/filtering/pattern_matching.yaml) |
 | FR-FS-02 | P2 | Sampling Control | Passing | [deploy/test/tf-k8s/filtering/sampling_rates.yaml](../../../deploy/test/tf-k8s/filtering/sampling_rates.yaml) |
-| FR-AGG-01 | P2 | Metric Aggregation | In Dev | [deploy/test/tf-k8s/aggregation/metrics_agg.yaml](../../../deploy/test/tf-k8s/aggregation/metrics_agg.yaml) |
+| FR-AGG-01 | P2 | Metric Aggregation | In CI | [deploy/test/tf-k8s/aggregation/metrics_agg.yaml](../../../deploy/test/tf-k8s/aggregation/metrics_agg.yaml) |
 | FR-GW-01 | P0 | Schema Enforcement | Passing | [deploy/test/tf-k8s/schema_pii_enforcement/schema_validation.yaml](../../../deploy/test/tf-k8s/schema_pii_enforcement/schema_validation.yaml) |
 | FR-GW-02 | P1 | Export Endpoints | Passing | [deploy/test/tf-k8s/gateway/export_endpoints.yaml](../../../deploy/test/tf-k8s/gateway/export_endpoints.yaml) |
 | FR-DLQ-01 | P1 | Dead Letter Processing | Passing | [deploy/test/tf-k8s/dlq/capture_failures.yaml](../../../deploy/test/tf-k8s/dlq/capture_failures.yaml) |

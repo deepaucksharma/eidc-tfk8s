@@ -23,9 +23,18 @@ type DPConfig struct {
 	Common config.FBConfig `json:"common"`
 
 	// DP-specific configuration
-	Enabled     bool   `json:"enabled"`
-	GCInterval  string `json:"gcInterval"`
-	StoragePath string `json:"storagePath"`
+	Enabled      bool     `json:"enabled"`
+	StorageType  string   `json:"storageType"`
+	TTLMinutes   int      `json:"ttlMinutes"`
+	GCInterval   string   `json:"gcInterval"`
+	DeduplicationKey []string `json:"deduplicationKey"`
+	
+	// Persistent storage configuration
+	PersistentStorage struct {
+		Enabled         bool   `json:"enabled"`
+		Path            string `json:"path"`
+		VolumeClaimName string `json:"volumeClaimName"`
+	} `json:"persistentStorage"`
 }
 
 // DP implements the FB-DP (Deduplication) function block
@@ -41,18 +50,29 @@ type DP struct {
 	dlqClient       fb.ChainPushServiceClient
 	dlqConn         *grpc.ClientConn
 	circuitBreaker  *resilience.CircuitBreaker
+	store           DeduplicationStore
+	storeMu         sync.RWMutex
+	gcCtx           context.Context
+	gcCancel        context.CancelFunc
+	dedupCounter    metrics.Counter
 }
 
 // NewDP creates a new Deduplication function block
 func NewDP() *DP {
+	// Create cancellable context for GC process
+	gcCtx, gcCancel := context.WithCancel(context.Background())
+	
 	return &DP{
 		BaseFunctionBlock: fb.BaseFunctionBlock{
 			name:  "fb-dp",
 			ready: false,
 		},
-		logger:  logging.NewLogger("fb-dp"),
-		metrics: metrics.NewFBMetrics("fb-dp"),
-		tracer:  tracing.NewTracer("fb-dp"),
+		logger:    logging.NewLogger("fb-dp"),
+		metrics:   metrics.NewFBMetrics("fb-dp"),
+		tracer:    tracing.NewTracer("fb-dp"),
+		gcCtx:     gcCtx,
+		gcCancel:  gcCancel,
+		dedupCounter: metrics.NewCounter("fb_dp_deduplicated_total", "Total number of deduplicated telemetry items"),
 	}
 }
 
@@ -115,13 +135,119 @@ func (d *DP) processBatch(ctx context.Context, batch *fb.MetricBatch) error {
 	ctx, span := d.tracer.StartSpan(ctx, "deduplication", nil)
 	defer span.End()
 
-	// TODO: Implement deduplication logic here
-	// This would involve:
-	// 1. Calculating hash for each metric in the batch
-	// 2. Checking against BadgerDB store if we've seen this hash before
-	// 3. Filtering out duplicates from the batch
+	// Skip deduplication if not enabled
+	d.configMu.RLock()
+	enabled := d.config.Enabled
+	deduplicationKeys := d.config.DeduplicationKey
+	ttlMinutes := d.config.TTLMinutes
+	d.configMu.RUnlock()
+
+	if !enabled || len(deduplicationKeys) == 0 {
+		d.logger.Debug("Deduplication disabled or no deduplication keys configured", nil)
+		return nil
+	}
+
+	// Get the store
+	d.storeMu.RLock()
+	store := d.store
+	d.storeMu.RUnlock()
+	
+	// Ensure we have a store
+	if store == nil {
+		return fmt.Errorf("deduplication store not initialized")
+	}
+
+	// Deserialize the batch data
+	var metrics []map[string]interface{}
+	if err := json.Unmarshal(batch.Data, &metrics); err != nil {
+		return fmt.Errorf("failed to deserialize metrics: %w", err)
+	}
+
+	// Process each metric
+	var uniqueMetrics []map[string]interface{}
+	var dedupCount int
+
+	for _, metric := range metrics {
+		// Create a deduplication key from the metric using the configured keys
+		dedupKey, err := createDeduplicationKey(metric, deduplicationKeys)
+		if err != nil {
+			d.logger.Warn("Failed to create deduplication key, including metric", err, map[string]interface{}{
+				"metric": metric,
+			})
+			uniqueMetrics = append(uniqueMetrics, metric)
+			continue
+		}
+
+		// Check if we've seen this metric before
+		exists, err := store.Has(dedupKey)
+		if err != nil {
+			d.logger.Warn("Failed to check deduplication key, including metric", err, map[string]interface{}{
+				"metric": metric,
+			})
+			uniqueMetrics = append(uniqueMetrics, metric)
+			continue
+		}
+
+		if exists {
+			// Metric is a duplicate, skip it
+			dedupCount++
+			d.logger.Debug("Deduplicated metric", map[string]interface{}{
+				"dedup_key": string(dedupKey),
+			})
+			continue
+		}
+
+		// Metric is unique, add it to the store
+		ttl := time.Duration(ttlMinutes) * time.Minute
+		if err := store.Put(dedupKey, ttl); err != nil {
+			d.logger.Warn("Failed to store deduplication key, including metric anyway", err, map[string]interface{}{
+				"metric": metric,
+			})
+		}
+
+		// Add the metric to the uniqueMetrics list
+		uniqueMetrics = append(uniqueMetrics, metric)
+	}
+
+	// Update deduplication counter
+	if dedupCount > 0 {
+		d.dedupCounter.Add(float64(dedupCount))
+		d.logger.Info("Deduplicated metrics", map[string]interface{}{
+			"count": dedupCount,
+		})
+	}
+
+	// Replace batch data with filtered metrics
+	if len(uniqueMetrics) != len(metrics) {
+		filteredData, err := json.Marshal(uniqueMetrics)
+		if err != nil {
+			return fmt.Errorf("failed to serialize filtered metrics: %w", err)
+		}
+		batch.Data = filteredData
+	}
 
 	return nil
+}
+
+// createDeduplicationKey creates a unique key for a metric based on the configured deduplication keys
+func createDeduplicationKey(metric map[string]interface{}, deduplicationKeys []string) ([]byte, error) {
+	// Create a map with just the fields used for deduplication
+	keyMap := make(map[string]interface{})
+	for _, key := range deduplicationKeys {
+		if val, ok := metric[key]; ok {
+			keyMap[key] = val
+		} else {
+			return nil, fmt.Errorf("deduplication key %s not found in metric", key)
+		}
+	}
+
+	// Serialize the map to JSON
+	keyJSON, err := json.Marshal(keyMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize deduplication key: %w", err)
+	}
+
+	return keyJSON, nil
 }
 
 // forwardToNextFB forwards the batch to the next function block
@@ -245,6 +371,11 @@ func (d *DP) UpdateConfig(ctx context.Context, configBytes []byte, generation in
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
+	// Initialize or update storage backend
+	if err := d.initializeStore(&newConfig); err != nil {
+		return fmt.Errorf("failed to initialize storage: %w", err)
+	}
+
 	// Apply configuration
 	d.configMu.Lock()
 	d.config = &newConfig
@@ -284,10 +415,100 @@ func (d *DP) UpdateConfig(ctx context.Context, configBytes []byte, generation in
 	d.logger.Info("Config updated", map[string]interface{}{
 		"generation":  generation,
 		"enabled":     newConfig.Enabled,
-		"gc_interval": newConfig.GCInterval,
-		"storage_path": newConfig.StoragePath,
+		"storage_type": newConfig.StorageType,
+		"persistent":  newConfig.PersistentStorage.Enabled,
+		"ttl_minutes": newConfig.TTLMinutes,
 	})
 
+	return nil
+}
+
+// initializeStore initializes the deduplication storage backend
+func (d *DP) initializeStore(config *DPConfig) error {
+	d.storeMu.Lock()
+	defer d.storeMu.Unlock()
+
+	// Close existing store if any
+	if d.store != nil {
+		if err := d.store.Close(); err != nil {
+			d.logger.Error("Failed to close existing store", err, nil)
+			// Continue to initialize new store
+		}
+		d.store = nil
+	}
+
+	// Stop existing GC process if any
+	if d.gcCancel != nil {
+		d.gcCancel()
+		// Create new cancellable context for GC process
+		d.gcCtx, d.gcCancel = context.WithCancel(context.Background())
+	}
+
+	// Initialize new store based on configuration
+	var store DeduplicationStore
+	var err error
+
+	switch config.StorageType {
+	case "memory":
+		d.logger.Info("Initializing in-memory deduplication store", nil)
+		memStore := NewMemoryStore()
+		store = memStore
+
+		// Start garbage collection for memory store
+		gcInterval, err := time.ParseDuration(config.GCInterval)
+		if err != nil {
+			gcInterval = 5 * time.Minute // Default to 5 minutes
+		}
+
+		// Start garbage collection in a goroutine
+		go func() {
+			ticker := time.NewTicker(gcInterval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-d.gcCtx.Done():
+					return
+				case <-ticker.C:
+					memStore.runGC()
+				}
+			}
+		}()
+
+	case "badgerdb":
+		// Determine storage path
+		var storagePath string
+		if config.PersistentStorage.Enabled {
+			storagePath = config.PersistentStorage.Path
+		} else {
+			storagePath = "/tmp/dedup-badger"
+		}
+
+		d.logger.Info("Initializing BadgerDB deduplication store", map[string]interface{}{
+			"path":       storagePath,
+			"persistent": config.PersistentStorage.Enabled,
+		})
+
+		// Initialize BadgerDB store
+		badgerStore, err := NewBadgerStore(storagePath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize BadgerDB store: %w", err)
+		}
+		store = badgerStore
+
+		// Start BadgerDB garbage collection
+		gcInterval, err := time.ParseDuration(config.GCInterval)
+		if err != nil {
+			gcInterval = 10 * time.Minute // Default to 10 minutes for BadgerDB
+		}
+		badgerStore.StartGarbageCollection(d.gcCtx, gcInterval)
+
+	default:
+		return fmt.Errorf("unsupported storage type: %s", config.StorageType)
+	}
+
+	// Set the store
+	d.store = store
 	return nil
 }
 
@@ -303,9 +524,37 @@ func (d *DP) validateConfig(config *DPConfig) error {
 		return fmt.Errorf("DLQ not configured")
 	}
 
-	// Check storage path
-	if config.StoragePath == "" {
-		return fmt.Errorf("storage path not configured")
+	// Validate storage type
+	if config.StorageType != "memory" && config.StorageType != "badgerdb" {
+		return fmt.Errorf("invalid storage type: %s, must be 'memory' or 'badgerdb'", config.StorageType)
+	}
+
+	// Validate TTL
+	if config.TTLMinutes <= 0 {
+		return fmt.Errorf("ttlMinutes must be positive")
+	}
+
+	// Validate deduplication keys
+	if len(config.DeduplicationKey) == 0 {
+		return fmt.Errorf("at least one deduplication key must be configured")
+	}
+
+	// Validate persistent storage configuration
+	if config.StorageType == "badgerdb" && config.PersistentStorage.Enabled {
+		if config.PersistentStorage.Path == "" {
+			return fmt.Errorf("persistent storage path not configured")
+		}
+	}
+
+	// Validate GC interval
+	if config.GCInterval == "" {
+		return fmt.Errorf("GC interval not configured")
+	}
+
+	// Try to parse GC interval
+	_, err := time.ParseDuration(config.GCInterval)
+	if err != nil {
+		return fmt.Errorf("invalid GC interval: %w", err)
 	}
 
 	return nil
@@ -362,6 +611,27 @@ func (d *DP) connectToDLQ(ctx context.Context, dlqAddr string) error {
 // Shutdown shuts down the Deduplication function block
 func (d *DP) Shutdown(ctx context.Context) error {
 	d.logger.Info("Shutting down FB-DP", nil)
+
+	// Stop garbage collection
+	if d.gcCancel != nil {
+		d.gcCancel()
+	}
+
+	// Close store
+	d.storeMu.Lock()
+	if d.store != nil {
+		// Flush store to ensure data is persisted
+		if err := d.store.Flush(); err != nil {
+			d.logger.Error("Failed to flush store during shutdown", err, nil)
+		}
+		
+		// Close store
+		if err := d.store.Close(); err != nil {
+			d.logger.Error("Failed to close store during shutdown", err, nil)
+		}
+		d.store = nil
+	}
+	d.storeMu.Unlock()
 
 	// Close connections
 	if d.nextFBConn != nil {

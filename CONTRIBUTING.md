@@ -99,6 +99,8 @@ python tools/test-matrix-builder/test_matrix_builder.py
 ```
 
 This will update the PRD with the latest test matrix. The CI pipeline will also run this automatically.
+
+When you finish, run 'make docs-sync' (or 'python tools/test-matrix-builder/test_matrix_builder.py') before pushing.
 ### Local Deployment
 
 Deploy the entire stack using Docker Compose:

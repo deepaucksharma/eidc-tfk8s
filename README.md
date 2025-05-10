@@ -55,5 +55,6 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and guidelines.
 - Architecture diagrams and descriptions are in [docs/architecture](./docs/architecture)
 - Operational runbooks can be found in [docs/runbooks](./docs/runbooks)
 - API documentation is available in [docs/api](./docs/api)
+- Test Matrix: [docs/appendices/appendix-a-test-matrix.md](./docs/appendices/appendix-a-test-matrix.md)
 - Test status updates are available in [docs/appendices/test-status-updates.md](./docs/appendices/test-status-updates.md)
 - The Product Requirements Document (PRD) is available in [docs/prd](./docs/prd)

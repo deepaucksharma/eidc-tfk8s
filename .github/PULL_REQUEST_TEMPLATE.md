@@ -16,9 +16,15 @@
 
 - [ ] Unit tests added/updated
 - [ ] Integration tests added/updated
-- [ ] Updated /docs/appendices/appendix-a-test-matrix.md for any new/changed FR/NFR
-- [ ] Linked new/changed tests -> row(s) in matrix
 - [ ] Manual testing performed
+
+## ☑️ Quality gates (tick all that apply)
+
+- [ ] I updated `docs/appendices/appendix-a-test-matrix.md` for every new / changed FR / NFR.
+- [ ] I linked my test YAML(s) in the **Test(s)** column of the matrix row(s).
+- [ ] If I touched tests, I ran `make docs-sync` or `python tools/test-matrix-builder/test_matrix_builder.py`.
+
+*PR will be blocked by CI if a P0/P1 row is not in **Passing***
 
 ## Screenshots (if applicable)
 
